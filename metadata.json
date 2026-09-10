@@ -1,0 +1,7 @@
+{
+  "name": "Church-OS",
+  "description": "A modern, mobile-first, multi-tenant Church Management System SaaS with real attendance, automated SMS, finance, and pastoral care.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

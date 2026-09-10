@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f766e"/>
+      <stop offset="100%" stop-color="#115e59"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14b8a6"/>
+      <stop offset="100%" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="112" fill="url(#tealGrad)"/>
+  
+  <!-- Subtle inner glow ring -->
+  <rect x="24" y="24" width="464" height="464" rx="92" fill="none" stroke="#2dd4bf" stroke-width="4" stroke-opacity="0.3"/>
+  
+  <!-- Modern Geometric Church / Cathedral Steeple & Cross Motif -->
+  <!-- Roof / Steeple Peak -->
+  <path d="M256 104 L376 224 L336 224 L336 392 L176 392 L176 224 L136 224 Z" fill="#ffffff" opacity="0.96"/>
+  
+  <!-- Stylized Elegant Cross Inset -->
+  <rect x="242" y="196" width="28" height="136" rx="6" fill="#0f766e"/>
+  <rect x="210" y="232" width="92" height="28" rx="6" fill="#0f766e"/>
+
+  <!-- Arch Doorway -->
+  <path d="M228 392 L228 344 C228 328 240 316 256 316 C272 316 284 328 284 344 L284 392 Z" fill="#14b8a6"/>
+  
+  <!-- Modern Digital Signal / Connectivity Rings representing Cloud / OS -->
+  <circle cx="256" cy="116" r="16" fill="#2dd4bf"/>
+  <path d="M220 96 C231 84 243 78 256 78 C269 78 281 84 292 96" fill="none" stroke="#2dd4bf" stroke-width="8" stroke-linecap="round"/>
+  <path d="M200 76 C216 60 235 52 256 52 C277 52 296 60 312 76" fill="none" stroke="#2dd4bf" stroke-width="8" stroke-linecap="round" stroke-opacity="0.6"/>
+</svg>
