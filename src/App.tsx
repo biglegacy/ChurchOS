@@ -193,7 +193,10 @@ export default function App() {
               )}
 
               {activeTab === 'sms' && (
-                <SmsModule church={church} />
+                <SmsModule
+                  church={church}
+                  onNavigateTab={tab => setActiveTab(tab)}
+                />
               )}
 
               {activeTab === 'settings' && (

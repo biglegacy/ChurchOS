@@ -2,12 +2,16 @@ import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import { db } from './server/db';
 import authRoutes from './server/routes/authRoutes';
 import superAdminRoutes from './server/routes/superAdminRoutes';
 import churchRoutes from './server/routes/churchRoutes';
 import memberRoutes from './server/routes/memberRoutes';
 
 async function startServer() {
+  // Wait for Firestore to establish connection and load collections
+  await db.ready;
+
   const app = express();
   const PORT = 3000;
   const httpServer = http.createServer(app);

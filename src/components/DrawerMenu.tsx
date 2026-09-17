@@ -17,6 +17,15 @@ import {
   FileText,
   LogOut,
   ChevronRight,
+  Clock,
+  CreditCard,
+  Tag,
+  Activity,
+  Coins,
+  Server,
+  Bell,
+  Megaphone,
+  Code,
 } from 'lucide-react';
 import { User, Church } from '../types';
 
@@ -78,12 +87,37 @@ export const DrawerMenu: React.FC<Props> = ({
 
   const superAdminNavItems = [
     {
-      section: 'Platform Governance',
+      section: 'Core Platform',
       items: [
-        { id: 'sa-dashboard', label: 'Platform Analytics', icon: LayoutDashboard },
-        { id: 'sa-churches', label: 'Church Multi-Tenancy', icon: Building2 },
-        { id: 'sa-sms', label: 'Central Communications API', icon: Radio },
-        { id: 'sa-audit', label: 'Platform Audit Logs', icon: FileText },
+        { id: 'sa-dashboard', label: 'Overview', icon: LayoutDashboard },
+        { id: 'sa-churches', label: 'Registered Churches', icon: Building2 },
+        { id: 'sa-pending-churches', label: 'Pending Churches', icon: Clock },
+        { id: 'sa-users', label: 'Users', icon: Users },
+      ],
+    },
+    {
+      section: 'Billing & Revenue',
+      items: [
+        { id: 'sa-subscriptions', label: 'Subscriptions', icon: CreditCard },
+        { id: 'sa-pricing', label: 'Pricing', icon: Tag },
+      ],
+    },
+    {
+      section: 'Communications',
+      items: [
+        { id: 'sa-sms', label: 'SMS Management', icon: Radio },
+        { id: 'sa-sms-delivery', label: 'SMS Delivery Monitoring', icon: Activity },
+        { id: 'sa-sms-balance', label: 'SMS Balance', icon: Coins },
+        { id: 'sa-arkesel-config', label: 'Arkesel Configuration', icon: Server },
+      ],
+    },
+    {
+      section: 'Engagement & System',
+      items: [
+        { id: 'sa-notifications', label: 'Notifications', icon: Bell },
+        { id: 'sa-popup-messages', label: 'Popup Messages', icon: Megaphone },
+        { id: 'sa-api-settings', label: 'API Settings', icon: Code },
+        { id: 'sa-audit', label: 'Audit Logs', icon: FileText },
         { id: 'sa-settings', label: 'System Settings', icon: Settings },
       ],
     },

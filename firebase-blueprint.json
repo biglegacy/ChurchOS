@@ -1,0 +1,97 @@
+{
+  "entities": {
+    "Church": {
+      "title": "Church",
+      "description": "A registered church tenant organization in Church-OS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Church ID" },
+        "name": { "type": "string", "description": "Official registered church name" },
+        "email": { "type": "string", "description": "Church contact email" },
+        "phone": { "type": "string", "description": "Church contact telephone" },
+        "address": { "type": "string", "description": "Physical church street address" },
+        "city": { "type": "string", "description": "City or municipality" },
+        "region": { "type": "string", "description": "State or region" },
+        "country": { "type": "string", "description": "Country of operation" },
+        "seniorPastor": { "type": "string", "description": "Head/Senior Pastor name" },
+        "adminName": { "type": "string", "description": "Primary administrator full name" },
+        "adminEmail": { "type": "string", "description": "Administrator login email" },
+        "adminPhone": { "type": "string", "description": "Administrator phone number" },
+        "status": { "type": "string", "enum": ["ACTIVE", "PENDING", "REJECTED", "SUSPENDED"] },
+        "subscription": { "type": "object", "description": "Subscription plan details" },
+        "features": { "type": "object", "description": "Feature flags enabled for this church" },
+        "settings": { "type": "object", "description": "Church-specific settings and templates" },
+        "createdAt": { "type": "string", "description": "Registration ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update ISO timestamp" }
+      },
+      "required": ["id", "name", "email", "status"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User account for Super Admin or Church staff/member",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID" },
+        "username": { "type": "string", "description": "Username or login identifier" },
+        "email": { "type": "string", "description": "User email address" },
+        "passwordHash": { "type": "string", "description": "Hashed password" },
+        "fullName": { "type": "string", "description": "Full name of the user" },
+        "role": { "type": "string", "description": "Access role" },
+        "churchId": { "type": "string", "description": "Associated church ID, if applicable" },
+        "phone": { "type": "string", "description": "User phone number" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "SUSPENDED"] },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "username", "role", "status"]
+    },
+    "SmsMessage": {
+      "title": "SmsMessage",
+      "description": "SMS dispatch log record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "SMS log ID" },
+        "churchId": { "type": "string", "description": "Church that dispatched the SMS" },
+        "churchName": { "type": "string", "description": "Registered church name at send time" },
+        "recipientName": { "type": "string", "description": "Recipient name" },
+        "phone": { "type": "string", "description": "Recipient phone" },
+        "normalizedPhone": { "type": "string", "description": "Standardized MSISDN" },
+        "senderName": { "type": "string", "description": "Exact sender ID used" },
+        "message": { "type": "string", "description": "SMS body content" },
+        "notificationType": { "type": "string", "description": "Type of alert" },
+        "status": { "type": "string", "description": "Delivery status" },
+        "createdAt": { "type": "string", "description": "Timestamp" }
+      },
+      "required": ["id", "churchId", "phone", "senderName", "message", "status"]
+    },
+    "PlatformSettings": {
+      "title": "PlatformSettings",
+      "description": "Central platform configuration including Arkesel SMS gateway credentials",
+      "type": "object",
+      "properties": {
+        "smsProvider": { "type": "string", "description": "Gateway provider name" },
+        "apiKey": { "type": "string", "description": "Arkesel SMS Gateway API key" },
+        "defaultSenderId": { "type": "string", "description": "Fallback sender name" },
+        "balanceCredits": { "type": "number", "description": "Current SMS balance" },
+        "connectionStatus": { "type": "string", "description": "Connection health" }
+      }
+    }
+  },
+  "firestore": {
+    "/churches/{churchId}": {
+      "schema": "Church",
+      "description": "Registered church tenants collection"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Platform and church user accounts"
+    },
+    "/smsMessages/{smsId}": {
+      "schema": "SmsMessage",
+      "description": "SMS records and logs"
+    },
+    "/platformSettings/{settingsId}": {
+      "schema": "PlatformSettings",
+      "description": "Central platform settings"
+    }
+  }
+}

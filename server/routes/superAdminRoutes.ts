@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { db, Church } from '../db';
+import { db, Church, User, hashPassword, PricingPlan, PopupMessage, SystemNotification } from '../db';
 import { requireAuth, requireSuperAdmin, AuthenticatedRequest } from '../auth';
 import { SmsService } from '../smsService';
 
@@ -217,116 +217,141 @@ router.post('/churches/:id/activate', (req: AuthenticatedRequest, res: Response)
 });
 
 // PUT /api/super-admin/churches/:id - Update church details & feature flags
-router.put('/churches/:id', (req: AuthenticatedRequest, res: Response) => {
+router.put('/churches/:id', async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const updates: Partial<Church> = req.body;
 
   const churches = db.get('churches');
   const church = churches.find(c => c.id === id);
   if (!church) {
-    res.status(404).json({ error: 'Church not found' });
+    res.status(404).json({ error: 'Church not found in Firebase' });
     return;
   }
 
-  db.update('churches', list =>
-    list.map(c => {
-      if (c.id === id) {
-        return {
-          ...c,
-          ...updates,
-          features: {
-            ...c.features,
-            ...(updates.features || {}),
-          },
-          settings: {
-            ...c.settings,
-            ...(updates.settings || {}),
-          },
-          subscription: {
-            ...c.subscription,
-            ...(updates.subscription || {}),
-          },
-        };
-      }
-      return c;
-    })
-  );
-
-  db.update('auditLogs', logs => [
-    {
-      id: `aud_${Date.now()}`,
-      churchId: id,
-      userId: req.user?.id || 'su@admin',
-      userName: req.user?.fullName || 'Super Admin',
-      action: 'CHURCH_UPDATED',
-      details: `Updated settings and feature controls for church "${church.name}".`,
-      timestamp: new Date().toISOString(),
+  const updatedChurch: Church = {
+    ...church,
+    ...updates,
+    features: {
+      ...church.features,
+      ...(updates.features || {}),
     },
-    ...logs.slice(0, 499),
-  ]);
+    settings: {
+      ...church.settings,
+      ...(updates.settings || {}),
+    },
+    subscription: {
+      ...church.subscription,
+      ...(updates.subscription || {}),
+    },
+    updatedAt: new Date().toISOString(),
+  };
 
-  res.json({ success: true, message: 'Church settings and feature controls updated.' });
+  // Directly persist church update to Firebase Firestore
+  await db.saveDoc('churches', id, updatedChurch);
+
+  // If administrator details were updated, synchronize corresponding admin user in Firebase
+  const users = db.get('users');
+  const adminUser = users.find(u => u.churchId === id && u.role === 'CHURCH_ADMINISTRATOR');
+  if (adminUser) {
+    const updatedAdmin: User = {
+      ...adminUser,
+      fullName: updates.adminName || adminUser.fullName,
+      email: updates.adminEmail || adminUser.email,
+      username: updates.adminEmail || adminUser.username,
+      phone: updates.adminPhone || adminUser.phone,
+    };
+    await db.saveDoc('users', adminUser.id, updatedAdmin);
+  }
+
+  // Audit log directly in Firebase
+  const auditEntry = {
+    id: `aud_${Date.now()}`,
+    churchId: id,
+    userId: req.user?.id || 'su@admin',
+    userName: req.user?.fullName || 'Super Admin',
+    action: 'CHURCH_UPDATED',
+    details: `Super Admin updated church details for "${updatedChurch.name}" in Firebase.`,
+    timestamp: new Date().toISOString(),
+  };
+  await db.saveDoc('auditLogs', auditEntry.id, auditEntry);
+
+  res.json({
+    success: true,
+    church: updatedChurch,
+    message: `Church "${updatedChurch.name}" updated successfully in Firebase.`,
+  });
 });
 
-// DELETE /api/super-admin/churches/:id - Hard delete with confirmation
-router.delete('/churches/:id', (req: AuthenticatedRequest, res: Response) => {
+// DELETE /api/super-admin/churches/:id - Hard delete from Firebase with permanent purge
+router.delete('/churches/:id', async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const churches = db.get('churches');
   const church = churches.find(c => c.id === id);
 
   if (!church) {
-    res.status(404).json({ error: 'Church not found' });
+    res.status(404).json({ error: 'Church not found in Firebase' });
     return;
   }
 
-  // Delete all tenant-scoped records
-  db.update('churches', list => list.filter(c => c.id !== id));
-  db.update('users', list => list.filter(u => u.churchId !== id));
-  db.update('members', list => list.filter(m => m.churchId !== id));
-  db.update('families', list => list.filter(f => f.churchId !== id));
-  db.update('visitors', list => list.filter(v => v.churchId !== id));
-  db.update('newConverts', list => list.filter(n => n.churchId !== id));
-  db.update('services', list => list.filter(s => s.churchId !== id));
-  db.update('attendance', list => list.filter(a => a.churchId !== id));
-  db.update('giving', list => list.filter(g => g.churchId !== id));
-  db.update('expenses', list => list.filter(e => e.churchId !== id));
-  db.update('accounts', list => list.filter(a => a.churchId !== id));
-  db.update('pastoralCases', list => list.filter(p => p.churchId !== id));
-  db.update('departments', list => list.filter(d => d.churchId !== id));
-  db.update('events', list => list.filter(e => e.churchId !== id));
-  db.update('smsMessages', list => list.filter(s => s.churchId !== id));
+  // Permanently delete church and cascade delete all tenant-scoped records from Firebase
+  await db.permanentlyDeleteChurch(id);
 
-  db.update('auditLogs', logs => [
-    {
-      id: `aud_${Date.now()}`,
-      churchId: 'PLATFORM',
-      userId: req.user?.id || 'su@admin',
-      userName: req.user?.fullName || 'Super Admin',
-      action: 'CHURCH_DELETED',
-      details: `Permanently deleted church "${church.name}" (ID: ${id}) and all tenant records.`,
-      timestamp: new Date().toISOString(),
-    },
-    ...logs.slice(0, 499),
-  ]);
+  // Record audit log in Firebase
+  const auditEntry = {
+    id: `aud_${Date.now()}`,
+    churchId: 'PLATFORM',
+    userId: req.user?.id || 'su@admin',
+    userName: req.user?.fullName || 'Super Admin',
+    action: 'CHURCH_DELETED',
+    details: `Permanently deleted church "${church.name}" (ID: ${id}) and all tenant records from Firebase.`,
+    timestamp: new Date().toISOString(),
+  };
+  await db.saveDoc('auditLogs', auditEntry.id, auditEntry);
 
-  res.json({ success: true, message: `Church "${church.name}" and all associated tenant records permanently deleted.` });
+  res.json({
+    success: true,
+    message: `Church "${church.name}" and all associated records have been permanently deleted from Firebase.`,
+  });
 });
 
 // GET /api/super-admin/sms/balance - Real SMS Provider Balance check
 router.get('/sms/balance', async (_req: AuthenticatedRequest, res: Response) => {
   const platform = db.get('platformSettings');
 
-  // Real balance endpoint check
+  // Verify and fetch live balance from Arkesel if API key is present
+  if (platform.apiKey && platform.apiKey.trim().length > 0) {
+    try {
+      await SmsService.checkGatewayBalance();
+    } catch {
+      // Continue with current database settings
+    }
+  }
+
+  const updated = db.get('platformSettings');
   res.json({
     success: true,
-    provider: platform.smsProvider,
-    connectionStatus: platform.connectionStatus,
-    balanceCredits: platform.balanceCredits,
-    estimatedCostGHS: (platform.balanceCredits * platform.costPerCreditGHS).toFixed(2),
-    costPerSmsGHS: platform.costPerCreditGHS,
-    totalDispatched: platform.totalSmsDispatched,
+    provider: updated.smsProvider,
+    connectionStatus: updated.connectionStatus,
+    balanceCredits: updated.balanceCredits,
+    estimatedCostGHS: (updated.balanceCredits * updated.costPerCreditGHS).toFixed(2),
+    costPerSmsGHS: updated.costPerCreditGHS,
+    totalDispatched: updated.totalSmsDispatched,
     lastChecked: new Date().toISOString(),
   });
+});
+
+// POST /api/super-admin/sms/verify - Verify Arkesel API connection without sending SMS
+router.post('/sms/verify', async (_req: AuthenticatedRequest, res: Response) => {
+  const result = await SmsService.checkGatewayBalance();
+  if (result.success) {
+    res.json(result);
+  } else {
+    res.status(400).json({
+      success: false,
+      error: result.message,
+      details: result.details,
+    });
+  }
 });
 
 // POST /api/super-admin/sms/top-up - Top up platform credits
@@ -368,17 +393,17 @@ router.post('/sms/test', async (req: AuthenticatedRequest, res: Response) => {
   const recipientPhone = req.body.testPhone || req.body.recipientPhone || req.body.phone;
   const message = req.body.testMessage || req.body.message || 'This is a test message from the church management system.';
 
-  if (!recipientPhone) {
+  if (!recipientPhone || !recipientPhone.trim()) {
     res.status(400).json({
       success: false,
-      error: 'SMS test failed. Please check your Arkesel API configuration and try again.',
-      details: 'Please provide a valid recipient phone number.',
+      error: 'Please provide a valid recipient phone number (e.g. 0241234567 or +233241234567).',
+      details: 'Recipient phone number is required.',
     });
     return;
   }
 
   try {
-    const result = await SmsService.testArkeselConnection(recipientPhone, message);
+    const result = await SmsService.testArkeselConnection(recipientPhone.trim(), message);
 
     if (result.success) {
       res.json({
@@ -389,14 +414,14 @@ router.post('/sms/test', async (req: AuthenticatedRequest, res: Response) => {
     } else {
       res.status(400).json({
         success: false,
-        error: 'SMS test failed. Please check your Arkesel API configuration and try again.',
-        details: result.details,
+        error: result.message || 'SMS test failed. Please check your Arkesel API configuration and try again.',
+        details: result.details || result.message,
       });
     }
   } catch (err: any) {
     res.status(500).json({
       success: false,
-      error: 'SMS test failed. Please check your Arkesel API configuration and try again.',
+      error: err.message || 'SMS test failed. Please check your Arkesel API configuration and try again.',
       details: err.message,
     });
   }
@@ -445,13 +470,21 @@ router.put('/settings', (req: AuthenticatedRequest, res: Response) => {
     }
   }
 
+  const hasKey = Boolean(newApiKey && newApiKey.trim().length > 0);
   const updated = db.update('platformSettings', curr => ({
     ...curr,
     ...updates,
     apiKey: newApiKey,
+    hasApiKey: hasKey,
   }));
 
-  const hasKey = Boolean(updated.apiKey && updated.apiKey.trim().length > 0);
+  // Verify connection with Arkesel asynchronously
+  if (hasKey) {
+    SmsService.checkGatewayBalance().catch(() => {});
+  } else {
+    db.update('platformSettings', s => ({ ...s, connectionStatus: 'Disconnected' }));
+  }
+
   const maskedKey = hasKey
     ? (updated.apiKey.length > 8 ? `${updated.apiKey.slice(0, 4)}••••••••${updated.apiKey.slice(-4)}` : '••••••••••••••••')
     : '';
@@ -464,6 +497,460 @@ router.put('/settings', (req: AuthenticatedRequest, res: Response) => {
       apiKey: maskedKey,
       hasApiKey: hasKey,
     },
+  });
+});
+
+// ================= USERS MANAGEMENT ================= //
+router.get('/users', (_req: AuthenticatedRequest, res: Response) => {
+  const users = db.get('users');
+  const churches = db.get('churches');
+
+  const enriched = users.map(u => {
+    const church = churches.find(c => c.id === u.churchId);
+    return {
+      id: u.id,
+      username: u.username,
+      email: u.email,
+      fullName: u.fullName,
+      role: u.role,
+      status: u.status,
+      churchId: u.churchId,
+      churchName: church ? church.name : (u.role === 'SUPER_ADMIN' ? 'Platform HQ' : 'Unassigned'),
+      phone: u.phone || '',
+      createdAt: u.createdAt,
+    };
+  });
+
+  res.json(enriched);
+});
+
+router.post('/users', (req: AuthenticatedRequest, res: Response) => {
+  const { username, email, fullName, role, churchId, password, phone } = req.body;
+  if (!username || !password || !fullName || !role) {
+    res.status(400).json({ error: 'Username, password, full name, and role are required.' });
+    return;
+  }
+
+  const users = db.get('users');
+  const lowerUser = username.trim().toLowerCase();
+  if (users.some(u => u.username.toLowerCase() === lowerUser || (email && u.email.toLowerCase() === email.trim().toLowerCase()))) {
+    res.status(400).json({ error: 'A user with this username or email already exists.' });
+    return;
+  }
+
+  const newUser: User = {
+    id: `usr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    username: username.trim(),
+    email: (email || username).trim().toLowerCase(),
+    passwordHash: hashPassword(password),
+    fullName: fullName.trim(),
+    role,
+    churchId: role === 'SUPER_ADMIN' ? undefined : churchId,
+    phone: phone?.trim(),
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
+  };
+
+  db.update('users', list => [newUser, ...list]);
+
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId: churchId || 'PLATFORM',
+      userId: req.user?.id || 'su@admin',
+      userName: req.user?.fullName || 'Super Admin',
+      action: 'USER_CREATED',
+      details: `Created new ${role} user: ${newUser.username} (${newUser.fullName})`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.status(201).json({
+    success: true,
+    user: {
+      id: newUser.id,
+      username: newUser.username,
+      email: newUser.email,
+      fullName: newUser.fullName,
+      role: newUser.role,
+      status: newUser.status,
+      churchId: newUser.churchId,
+    },
+    message: 'User created successfully.',
+  });
+});
+
+router.put('/users/:id/status', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!['ACTIVE', 'INACTIVE', 'SUSPENDED'].includes(status)) {
+    res.status(400).json({ error: 'Invalid status value.' });
+    return;
+  }
+
+  const users = db.get('users');
+  const user = users.find(u => u.id === id);
+  if (!user) {
+    res.status(404).json({ error: 'User not found.' });
+    return;
+  }
+
+  if (user.role === 'SUPER_ADMIN' && user.id === req.user?.id && status !== 'ACTIVE') {
+    res.status(400).json({ error: 'You cannot deactivate your own Super Admin account.' });
+    return;
+  }
+
+  db.update('users', list =>
+    list.map(u => (u.id === id ? { ...u, status } : u))
+  );
+
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId: user.churchId || 'PLATFORM',
+      userId: req.user?.id || 'su@admin',
+      userName: req.user?.fullName || 'Super Admin',
+      action: 'USER_STATUS_CHANGE',
+      details: `Changed user status of ${user.username} to ${status}.`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({ success: true, message: `User status changed to ${status}.` });
+});
+
+router.delete('/users/:id', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const users = db.get('users');
+  const user = users.find(u => u.id === id);
+
+  if (!user) {
+    res.status(404).json({ error: 'User not found.' });
+    return;
+  }
+
+  if (user.role === 'SUPER_ADMIN') {
+    res.status(400).json({ error: 'Super Admin users cannot be deleted.' });
+    return;
+  }
+
+  db.update('users', list => list.filter(u => u.id !== id));
+
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId: user.churchId || 'PLATFORM',
+      userId: req.user?.id || 'su@admin',
+      userName: req.user?.fullName || 'Super Admin',
+      action: 'USER_DELETED',
+      details: `Deleted user ${user.username} (${user.fullName}).`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({ success: true, message: `User ${user.username} deleted successfully.` });
+});
+
+// ================= SUBSCRIPTIONS ================= //
+router.get('/subscriptions', (_req: AuthenticatedRequest, res: Response) => {
+  const churches = db.get('churches');
+  const plans = db.get('pricingPlans') || [];
+
+  const items = churches.map(c => ({
+    churchId: c.id,
+    churchName: c.name,
+    adminEmail: c.adminEmail,
+    adminPhone: c.adminPhone,
+    status: c.status,
+    subscription: c.subscription,
+    createdAt: c.createdAt,
+  }));
+
+  const activeCount = churches.filter(c => c.subscription?.status === 'ACTIVE').length;
+  const expiringCount = churches.filter(c => c.subscription?.status === 'EXPIRING').length;
+  const expiredCount = churches.filter(c => c.subscription?.status === 'EXPIRED').length;
+  const totalRevenueGHS = churches.reduce((sum, c) => sum + (c.subscription?.priceGHS || 0), 0);
+
+  res.json({
+    subscriptions: items,
+    plans,
+    metrics: {
+      totalChurches: churches.length,
+      activeCount,
+      expiringCount,
+      expiredCount,
+      totalRevenueGHS,
+    },
+  });
+});
+
+router.put('/subscriptions/:churchId', (req: AuthenticatedRequest, res: Response) => {
+  const { churchId } = req.params;
+  const { plan, status, expiresAt, priceGHS } = req.body;
+
+  const churches = db.get('churches');
+  const church = churches.find(c => c.id === churchId);
+
+  if (!church) {
+    res.status(404).json({ error: 'Church not found.' });
+    return;
+  }
+
+  db.update('churches', list =>
+    list.map(c => {
+      if (c.id === churchId) {
+        return {
+          ...c,
+          subscription: {
+            ...c.subscription,
+            plan: plan || c.subscription.plan,
+            status: status || c.subscription.status,
+            expiresAt: expiresAt || c.subscription.expiresAt,
+            priceGHS: priceGHS !== undefined ? Number(priceGHS) : c.subscription.priceGHS,
+          },
+        };
+      }
+      return c;
+    })
+  );
+
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'su@admin',
+      userName: req.user?.fullName || 'Super Admin',
+      action: 'SUBSCRIPTION_UPDATED',
+      details: `Updated subscription for "${church.name}": Plan ${plan || church.subscription.plan}, Status ${status || church.subscription.status}`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({ success: true, message: `Subscription updated for ${church.name}.` });
+});
+
+// ================= PRICING MANAGEMENT ================= //
+router.get('/pricing', (_req: AuthenticatedRequest, res: Response) => {
+  const plans = db.get('pricingPlans') || [];
+  res.json(plans);
+});
+
+router.post('/pricing', (req: AuthenticatedRequest, res: Response) => {
+  const { name, code, priceMonthlyGHS, priceAnnualGHS, maxMembers, monthlySmsCredits, features } = req.body;
+  if (!name || !code || priceMonthlyGHS === undefined) {
+    res.status(400).json({ error: 'Name, code, and monthly price are required.' });
+    return;
+  }
+
+  const newPlan: PricingPlan = {
+    id: `plan_${Date.now()}`,
+    name,
+    code: code.toLowerCase().replace(/\s+/g, '_'),
+    priceMonthlyGHS: Number(priceMonthlyGHS),
+    priceAnnualGHS: Number(priceAnnualGHS || Number(priceMonthlyGHS) * 10),
+    maxMembers: Number(maxMembers || 500),
+    monthlySmsCredits: Number(monthlySmsCredits || 500),
+    features: Array.isArray(features) ? features : (typeof features === 'string' ? features.split(',').map(f => f.trim()).filter(Boolean) : []),
+    status: 'ACTIVE',
+  };
+
+  db.update('pricingPlans', list => [...(list || []), newPlan]);
+  res.status(201).json({ success: true, plan: newPlan, message: 'Pricing plan created.' });
+});
+
+router.put('/pricing/:id', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const updates = req.body;
+
+  db.update('pricingPlans', list =>
+    (list || []).map(p => {
+      if (p.id === id) {
+        return {
+          ...p,
+          ...updates,
+          priceMonthlyGHS: updates.priceMonthlyGHS !== undefined ? Number(updates.priceMonthlyGHS) : p.priceMonthlyGHS,
+          priceAnnualGHS: updates.priceAnnualGHS !== undefined ? Number(updates.priceAnnualGHS) : p.priceAnnualGHS,
+          maxMembers: updates.maxMembers !== undefined ? Number(updates.maxMembers) : p.maxMembers,
+          monthlySmsCredits: updates.monthlySmsCredits !== undefined ? Number(updates.monthlySmsCredits) : p.monthlySmsCredits,
+          features: Array.isArray(updates.features) ? updates.features : p.features,
+        };
+      }
+      return p;
+    })
+  );
+
+  res.json({ success: true, message: 'Pricing plan updated.' });
+});
+
+// ================= POPUP MESSAGES ================= //
+router.get('/popup-messages', (_req: AuthenticatedRequest, res: Response) => {
+  const popups = db.get('popupMessages') || [];
+  res.json(popups);
+});
+
+router.post('/popup-messages', (req: AuthenticatedRequest, res: Response) => {
+  const { title, message, type, targetAudience, expiresAt } = req.body;
+  if (!title || !message) {
+    res.status(400).json({ error: 'Title and message are required.' });
+    return;
+  }
+
+  const newPopup: PopupMessage = {
+    id: `pop_${Date.now()}`,
+    title: title.trim(),
+    message: message.trim(),
+    type: type || 'INFO',
+    targetAudience: targetAudience || 'ALL',
+    active: true,
+    expiresAt,
+    createdAt: new Date().toISOString(),
+    createdBy: req.user?.fullName || 'Super Admin',
+  };
+
+  db.update('popupMessages', list => [newPopup, ...(list || [])]);
+
+  res.status(201).json({ success: true, popup: newPopup, message: 'Popup message broadcast created.' });
+});
+
+router.put('/popup-messages/:id/toggle', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  let newStatus = false;
+  db.update('popupMessages', list =>
+    (list || []).map(p => {
+      if (p.id === id) {
+        newStatus = !p.active;
+        return { ...p, active: newStatus };
+      }
+      return p;
+    })
+  );
+
+  res.json({ success: true, active: newStatus, message: `Popup message is now ${newStatus ? 'ACTIVE' : 'INACTIVE'}.` });
+});
+
+router.delete('/popup-messages/:id', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  db.update('popupMessages', list => (list || []).filter(p => p.id !== id));
+  res.json({ success: true, message: 'Popup message deleted.' });
+});
+
+// ================= NOTIFICATIONS ================= //
+router.get('/notifications', (_req: AuthenticatedRequest, res: Response) => {
+  const notifs = db.get('systemNotifications') || [];
+  res.json(notifs);
+});
+
+router.post('/notifications', (req: AuthenticatedRequest, res: Response) => {
+  const { title, message, severity, category } = req.body;
+  if (!title || !message) {
+    res.status(400).json({ error: 'Title and message are required.' });
+    return;
+  }
+
+  const newNotif: SystemNotification = {
+    id: `notif_${Date.now()}`,
+    title: title.trim(),
+    message: message.trim(),
+    severity: severity || 'low',
+    category: category || 'SYSTEM',
+    isRead: false,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.update('systemNotifications', list => [newNotif, ...(list || [])]);
+  res.status(201).json({ success: true, notification: newNotif, message: 'System alert notification created.' });
+});
+
+router.put('/notifications/:id/read', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  db.update('systemNotifications', list =>
+    (list || []).map(n => (n.id === id ? { ...n, isRead: true } : n))
+  );
+  res.json({ success: true });
+});
+
+// ================= API SETTINGS ================= //
+router.get('/api-settings', (_req: AuthenticatedRequest, res: Response) => {
+  const settings = db.get('platformSettings');
+  res.json({
+    apiEndpoint: settings.apiEndpoint,
+    smsProvider: settings.smsProvider,
+    defaultSenderId: settings.defaultSenderId,
+    connectionStatus: settings.connectionStatus,
+    webhookUrl: 'https://ais-dev-v5vseiddljyuoccmnf2uvj-444415977811.europe-west3.run.app/api/webhooks/arkesel',
+    rateLimitPerMinute: 120,
+    timeoutSeconds: 15,
+    retryAttempts: 3,
+    corsOrigin: '*',
+    lastUpdated: new Date().toISOString(),
+  });
+});
+
+router.put('/api-settings', (req: AuthenticatedRequest, res: Response) => {
+  const { apiEndpoint, defaultSenderId, smsProvider } = req.body;
+
+  const updated = db.update('platformSettings', curr => ({
+    ...curr,
+    apiEndpoint: apiEndpoint || curr.apiEndpoint,
+    defaultSenderId: defaultSenderId || curr.defaultSenderId,
+    smsProvider: smsProvider || curr.smsProvider,
+  }));
+
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId: 'PLATFORM',
+      userId: req.user?.id || 'su@admin',
+      userName: req.user?.fullName || 'Super Admin',
+      action: 'API_SETTINGS_UPDATED',
+      details: `Updated Central API settings: Endpoint ${updated.apiEndpoint}, Sender ID: ${updated.defaultSenderId}`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({ success: true, message: 'Central API configuration saved successfully.' });
+});
+
+// ================= SMS DELIVERY MONITORING & STATS (SUPER ADMIN ONLY) ================= //
+router.get('/sms/stats', (_req: AuthenticatedRequest, res: Response) => {
+  const messages = db.get('smsMessages');
+  const platform = db.get('platformSettings');
+
+  const total = messages.length;
+  const delivered = messages.filter(m => m.status === 'Delivered').length;
+  const accepted = messages.filter(m => m.status === 'Accepted' || m.status === 'Submitted').length;
+  const queued = messages.filter(m => m.status === 'Queued' || m.status === 'Sending').length;
+  const failed = messages.filter(m => m.status === 'Failed' || m.status === 'Unable to Send').length;
+
+  const deliveryRate = total > 0 ? ((delivered / total) * 100).toFixed(1) : '100.0';
+  const acceptanceRate = total > 0 ? (((delivered + accepted) / total) * 100).toFixed(1) : '100.0';
+
+  // Telecom Carrier breakdown (estimated by Ghana network prefixes)
+  const carrierStats = {
+    mtn: messages.filter(m => /^(233)?(0)?(24|54|55|59)/.test(m.normalizedPhone || m.phone)).length,
+    telecel: messages.filter(m => /^(233)?(0)?(20|50)/.test(m.normalizedPhone || m.phone)).length,
+    at: messages.filter(m => /^(233)?(0)?(26|27|56|57)/.test(m.normalizedPhone || m.phone)).length,
+    other: 0,
+  };
+  carrierStats.other = Math.max(0, total - (carrierStats.mtn + carrierStats.telecel + carrierStats.at));
+
+  res.json({
+    totalDispatched: total,
+    delivered,
+    accepted,
+    queued,
+    failed,
+    deliveryRatePercent: parseFloat(deliveryRate),
+    acceptanceRatePercent: parseFloat(acceptanceRate),
+    balanceCredits: platform.balanceCredits,
+    carrierStats,
+    recentFailures: messages.filter(m => m.status === 'Failed' || m.status === 'Unable to Send').slice(0, 10),
   });
 });
 

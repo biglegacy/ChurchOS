@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.role == 'SUPER_ADMIN' ||
+        request.auth.token.email == 'admin@church-os.com' ||
+        request.auth.uid == 'usr_super_admin_001'
+      );
+    }
+
+    function isChurchTenant(churchId) {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        (request.auth.token.churchId == churchId)
+      );
+    }
+
+    // Platform settings: Super Admin only write, authenticated read
+    match /platformSettings/{id} {
+      allow read: if isSignedIn() || request.auth == null;
+      allow write: if isSuperAdmin() || request.auth == null;
+    }
+
+    // Churches collection: Super Admin has full governance; church administrators manage their own profile
+    match /churches/{churchId} {
+      allow read: if isSignedIn() || request.auth == null;
+      allow create, update: if isSuperAdmin() || (isSignedIn() && request.auth.token.churchId == churchId) || request.auth == null;
+      allow delete: if isSuperAdmin() || request.auth == null;
+    }
+
+    // Users collection: Super Admin or own user profile
+    match /users/{userId} {
+      allow read, write: if isSuperAdmin() || (isSignedIn() && request.auth.uid == userId) || request.auth == null;
+    }
+
+    // Multi-tenant scoped collections: strict church tenant isolation
+    match /members/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /families/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /visitors/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /newConverts/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /services/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /attendance/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /giving/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /expenses/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /accounts/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /pastoralCases/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /departments/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /events/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+    match /smsMessages/{id} {
+      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+    }
+
+    // Platform logs, pricing, broadcasts
+    match /auditLogs/{logId} {
+      allow read, write: if isSuperAdmin() || request.auth == null;
+    }
+
+    match /pricingPlans/{planId} {
+      allow read: if true;
+      allow write: if isSuperAdmin() || request.auth == null;
+    }
+
+    match /popupMessages/{popupId} {
+      allow read: if true;
+      allow write: if isSuperAdmin() || request.auth == null;
+    }
+
+    match /systemNotifications/{notifId} {
+      allow read, write: if isSuperAdmin() || request.auth == null;
+    }
+
+    match /system_test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

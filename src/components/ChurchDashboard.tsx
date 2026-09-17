@@ -13,9 +13,11 @@ import {
   UserPlus,
   HeartHandshake,
   Calendar,
+  Cake,
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { Church } from '../types';
+import { UpcomingBirthdaysWidget } from './UpcomingBirthdaysWidget';
 
 interface Props {
   church?: Church | null;
@@ -114,18 +116,18 @@ export const ChurchDashboard: React.FC<Props> = ({ church, onNavigateTab, onQuic
           </p>
         </div>
 
-        {/* SMS Delivery Rate */}
+        {/* Pastoral & Care Follow-ups */}
         <div
-          onClick={() => onNavigateTab('sms')}
+          onClick={() => onNavigateTab('pastoral')}
           className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-teal-300 transition-colors"
         >
           <div className="flex items-center justify-between text-slate-500">
-            <p className="text-slate-500 text-sm font-medium">SMS Delivery Rate</p>
-            <MessageSquare className="w-4 h-4 text-teal-700" />
+            <p className="text-slate-500 text-sm font-medium">Care & Follow-ups</p>
+            <HeartHandshake className="w-4 h-4 text-teal-700" />
           </div>
-          <p className="text-2xl font-bold mt-1 text-slate-900">98.2%</p>
+          <p className="text-2xl font-bold mt-1 text-slate-900">{kpis.pendingFollowups || 0}</p>
           <p className="text-xs text-slate-500 mt-1 font-medium">
-            {kpis.smsSent || 0} sent • {kpis.smsDelivered || 0} delivered
+            {kpis.pendingPastoral || 0} Pastoral Cases • {kpis.pendingVisitors || 0} Visitors
           </p>
         </div>
       </div>
@@ -188,6 +190,14 @@ export const ChurchDashboard: React.FC<Props> = ({ church, onNavigateTab, onQuic
           </button>
         </div>
       </div>
+
+      {/* Upcoming Member Birthdays & Automated Greeting Quick-Action Widget */}
+      <UpcomingBirthdaysWidget
+        initialData={data?.upcomingBirthdays}
+        church={church}
+        onNavigateToMembers={() => onNavigateTab('members')}
+        onRefresh={loadDashboard}
+      />
 
       {/* Sleek Two-Column: Recent Attendance Bar Chart & Automated SMS Status */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

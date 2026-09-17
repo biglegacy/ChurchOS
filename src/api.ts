@@ -70,6 +70,7 @@ export class ApiClient {
       const err: any = new Error(errorMsg);
       err.status = res.status;
       err.code = data.code;
+      err.details = data.details;
       throw err;
     }
 

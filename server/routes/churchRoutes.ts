@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent } from '../db';
+import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent, SmsMessage } from '../db';
 import { requireAuth, enforceTenant, AuthenticatedRequest } from '../auth';
 import { SmsService, normalizePhoneNumber } from '../smsService';
 
@@ -17,6 +17,113 @@ function getChurchId(req: AuthenticatedRequest): string {
   return req.user?.churchId!;
 }
 
+// Computes Monday to Sunday range of current week
+function getWeekRange(refDate = new Date()) {
+  const current = new Date(refDate);
+  const day = current.getDay(); // 0 = Sun, 1 = Mon ...
+  const diffToMonday = current.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(current.setDate(diffToMonday));
+  monday.setHours(0, 0, 0, 0);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+
+  return { monday, sunday };
+}
+
+export function calculateUpcomingBirthdays(members: Member[], churchId: string, smsMessages: SmsMessage[], refDate = new Date()) {
+  const { monday, sunday } = getWeekRange(refDate);
+  const todayMonth = refDate.getMonth() + 1; // 1-12
+  const todayDate = refDate.getDate(); // 1-31
+  const todayYear = refDate.getFullYear();
+  const todayYMD = `${todayYear}-${String(todayMonth).padStart(2, '0')}-${String(todayDate).padStart(2, '0')}`;
+
+  const weekDays: Array<{ month: number; day: number; dateObj: Date; dayName: string; isToday: boolean; isTomorrow: boolean; daysDiff: number }> = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const m = d.getMonth() + 1;
+    const dt = d.getDate();
+    const daysDiff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(todayYear, todayMonth - 1, todayDate).getTime()) / (1000 * 60 * 60 * 24));
+    weekDays.push({
+      month: m,
+      day: dt,
+      dateObj: d,
+      dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
+      isToday: daysDiff === 0,
+      isTomorrow: daysDiff === 1,
+      daysDiff,
+    });
+  }
+
+  const result: any[] = [];
+
+  for (const member of members) {
+    if (!member.dateOfBirth) continue;
+    const parts = member.dateOfBirth.split('-');
+    let birthMonth: number;
+    let birthDay: number;
+    let birthYear: number | null = null;
+    if (parts.length === 3) {
+      birthYear = parseInt(parts[0], 10);
+      birthMonth = parseInt(parts[1], 10);
+      birthDay = parseInt(parts[2], 10);
+    } else if (parts.length === 2) {
+      birthMonth = parseInt(parts[0], 10);
+      birthDay = parseInt(parts[1], 10);
+    } else {
+      continue;
+    }
+
+    const matchedDay = weekDays.find(w => w.month === birthMonth && w.day === birthDay);
+    if (!matchedDay) continue;
+
+    const age = birthYear ? todayYear - birthYear : undefined;
+
+    const alreadySentToday = smsMessages.some(sms =>
+      sms.churchId === churchId &&
+      sms.notificationType === 'BIRTHDAY_GREETING' &&
+      (sms.recipientName === member.fullName || sms.phone === member.phone) &&
+      (sms.sentAt || sms.createdAt || '').startsWith(todayYMD)
+    );
+
+    result.push({
+      memberId: member.id,
+      fullName: member.fullName,
+      phone: member.phone,
+      normalizedPhone: member.normalizedPhone || member.phone,
+      dateOfBirth: member.dateOfBirth,
+      birthDateFormatted: matchedDay.dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      dayOfWeek: matchedDay.dayName,
+      isToday: matchedDay.isToday,
+      isTomorrow: matchedDay.isTomorrow,
+      daysDiff: matchedDay.daysDiff,
+      age,
+      gender: member.gender,
+      departmentIds: member.departmentIds || [],
+      alreadySentToday,
+    });
+  }
+
+  result.sort((a, b) => {
+    if (a.isToday && !b.isToday) return -1;
+    if (!a.isToday && b.isToday) return 1;
+    if (a.daysDiff >= 0 && b.daysDiff >= 0) return a.daysDiff - b.daysDiff;
+    if (a.daysDiff >= 0 && b.daysDiff < 0) return -1;
+    if (a.daysDiff < 0 && b.daysDiff >= 0) return 1;
+    return a.daysDiff - b.daysDiff;
+  });
+
+  return {
+    weekRange: `${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${sunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+    totalThisWeek: result.length,
+    todayCount: result.filter(r => r.isToday).length,
+    upcomingCount: result.filter(r => r.daysDiff >= 0).length,
+    birthdays: result,
+  };
+}
+
 // GET /api/church/dashboard - Real live church KPIs
 router.get('/dashboard', (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
@@ -28,7 +135,7 @@ router.get('/dashboard', (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  const members = db.get('members').filter(m => m.churchId === churchId);
+  let members = db.get('members').filter(m => m.churchId === churchId);
   const visitors = db.get('visitors').filter(v => v.churchId === churchId);
   const converts = db.get('newConverts').filter(c => c.churchId === churchId);
   const services = db.get('services').filter(s => s.churchId === churchId);
@@ -63,10 +170,8 @@ router.get('/dashboard', (req: AuthenticatedRequest, res: Response) => {
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
   const netSurplus = totalGiving - totalExpenses;
 
-  // SMS stats
-  const smsSent = smsMessages.length;
-  const smsDelivered = smsMessages.filter(s => s.status === 'Delivered').length;
-  const smsFailed = smsMessages.filter(s => s.status === 'Failed' || s.status === 'Unable to Send').length;
+  // SMS dispatches count (sanitized for church view)
+  const recentDispatchesCount = smsMessages.length;
 
   // Follow-ups pending
   const pendingVisitors = visitors.filter(v => v.followUpStatus === 'New' || v.followUpStatus === 'Contacted').length;
@@ -77,6 +182,9 @@ router.get('/dashboard', (req: AuthenticatedRequest, res: Response) => {
 
   // Recent transactions
   const recentGiving = [...giving].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
+
+  // Upcoming member birthdays for current week
+  const upcomingBirthdays = calculateUpcomingBirthdays(members, churchId, smsMessages);
 
   res.json({
     church: {
@@ -101,13 +209,130 @@ router.get('/dashboard', (req: AuthenticatedRequest, res: Response) => {
       totalGiving,
       totalExpenses,
       netSurplus,
-      smsSent,
-      smsDelivered,
-      smsFailed,
+      recentDispatchesCount,
+      pendingPastoral,
+      pendingVisitors,
       pendingFollowups: pendingVisitors + pendingPastoral,
     },
     upcomingEvents,
     recentGiving,
+    upcomingBirthdays,
+  });
+});
+
+// ================= BIRTHDAYS & AUTOMATED GREETINGS ================= //
+router.get('/birthdays/upcoming', (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const members = db.get('members').filter(m => m.churchId === churchId);
+  const smsMessages = db.get('smsMessages').filter(s => s.churchId === churchId);
+  const data = calculateUpcomingBirthdays(members, churchId, smsMessages);
+  res.json(data);
+});
+
+router.post('/birthdays/send-greeting', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const { memberId, sendToAllToday, customMessage } = req.body;
+
+  const church = db.get('churches').find(c => c.id === churchId);
+  if (!church) {
+    res.status(404).json({ error: 'Church not found' });
+    return;
+  }
+
+  const members = db.get('members').filter(m => m.churchId === churchId);
+  let targetMembers: Member[] = [];
+
+  if (memberId) {
+    const target = members.find(m => m.id === memberId);
+    if (!target) {
+      res.status(404).json({ error: 'Member not found.' });
+      return;
+    }
+    targetMembers = [target];
+  } else if (sendToAllToday) {
+    const now = new Date();
+    const tMonth = now.getMonth() + 1;
+    const tDate = now.getDate();
+
+    targetMembers = members.filter(m => {
+      if (!m.dateOfBirth) return false;
+      const parts = m.dateOfBirth.split('-');
+      if (parts.length < 2) return false;
+      const mMonth = parseInt(parts.length === 3 ? parts[1] : parts[0], 10);
+      const mDay = parseInt(parts.length === 3 ? parts[2] : parts[1], 10);
+      return mMonth === tMonth && mDay === tDate;
+    });
+
+    if (targetMembers.length === 0) {
+      res.status(400).json({ error: 'No member birthdays found celebrating today.' });
+      return;
+    }
+  } else {
+    res.status(400).json({ error: 'Please specify memberId or set sendToAllToday: true.' });
+    return;
+  }
+
+  const defaultGreetingTemplate =
+    "Happy Birthday, [Member Name]! 🎉 The leadership and entire family of [Church Name] celebrate the grace and goodness of God upon your life today. May your new year be crowned with divine favour, joy, and peace! Have a glorious celebration. 🎂";
+
+  const template = customMessage && customMessage.trim().length > 0 ? customMessage.trim() : defaultGreetingTemplate;
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  let sent = 0;
+  let failed = 0;
+  const results: any[] = [];
+
+  for (const member of targetMembers) {
+    const personalizedMessage = template
+      .replace(/\[Member Name\]/g, member.fullName)
+      .replace(/\[Church Name\]/g, church.name);
+
+    const idempotencyKey = `bday_${churchId}_${member.id}_${todayStr}`;
+
+    try {
+      const sendRes = await SmsService.sendSms({
+        churchId,
+        recipientName: member.fullName,
+        phone: member.phone,
+        message: personalizedMessage,
+        notificationType: 'BIRTHDAY_GREETING',
+        idempotencyKey,
+      });
+
+      if (sendRes.success) {
+        sent++;
+      } else {
+        failed++;
+      }
+      results.push({
+        memberId: member.id,
+        memberName: member.fullName,
+        phone: member.phone,
+        success: sendRes.success,
+        alreadySent: sendRes.alreadySent,
+        message: personalizedMessage,
+      });
+    } catch (err: any) {
+      failed++;
+      results.push({
+        memberId: member.id,
+        memberName: member.fullName,
+        phone: member.phone,
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+
+  res.json({
+    success: true,
+    sent,
+    failed,
+    totalTargeted: targetMembers.length,
+    message: sent > 0
+      ? `Automated birthday greeting SMS sent to ${sent} celebrant(s) via registered sender ID "${church.settings.senderName || church.name.slice(0, 11).toUpperCase()}".`
+      : 'Failed to dispatch birthday SMS.',
+    results,
   });
 });
 
@@ -684,10 +909,12 @@ router.post('/giving', async (req: AuthenticatedRequest, res: Response) => {
 
   db.update('giving', list => [newGiving, ...list]);
 
-  // AUTOMATIC TITHE SMS NOTIFICATION (Prompt Requirement 20)
+  // AUTOMATIC CONTRIBUTION SMS NOTIFICATION (Requirements 2, 3, 10)
   let smsResult = null;
-  if (newGiving.givingType === 'Tithe' && memberPhone) {
-    smsResult = await SmsService.sendTitheConfirmation(churchId, id);
+  try {
+    smsResult = await SmsService.sendContributionConfirmation(churchId, id);
+  } catch (err) {
+    console.error('Automatic contribution SMS error:', err);
   }
 
   // Audit log
@@ -929,14 +1156,38 @@ router.post('/sms/send', async (req: AuthenticatedRequest, res: Response) => {
   }
 
   const members = db.get('members').filter(m => m.churchId === churchId);
-  let targetRecipients: Array<{ name: string; phone: string }> = [];
+  const visitors = db.get('visitors').filter(v => v.churchId === churchId);
+  const users = db.get('users').filter(u => u.churchId === churchId);
+  let targetRecipients: Array<{ name: string; phone: string; memberId?: string }> = [];
 
-  if (recipientType === 'ALL_MEMBERS') {
-    targetRecipients = members.map(m => ({ name: m.fullName, phone: m.phone }));
+  if (recipientType === 'SELECTED_MEMBERS' && Array.isArray(req.body.memberIds)) {
+    const selectedIds: string[] = req.body.memberIds;
+    const selectedMembers = members.filter(m => selectedIds.includes(m.id));
+    targetRecipients = selectedMembers.map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
+  } else if (recipientType === 'ALL_MEMBERS') {
+    targetRecipients = members.map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
   } else if (recipientType === 'ACTIVE_MEMBERS') {
-    targetRecipients = members.filter(m => m.membershipStatus === 'Active').map(m => ({ name: m.fullName, phone: m.phone }));
+    targetRecipients = members.filter(m => m.membershipStatus === 'Active').map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
+  } else if (recipientType === 'PARENTS') {
+    // Parents: Head or Spouse of families, or members with family role
+    const parents = members.filter(m => m.familyRole === 'Head' || m.familyRole === 'Spouse' || m.maritalStatus === 'Married');
+    targetRecipients = (parents.length > 0 ? parents : members).map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
+  } else if (recipientType === 'TEACHERS') {
+    // Sunday school teachers, children unit leaders, ministry leaders
+    const depts = db.get('departments').filter(d => d.churchId === churchId);
+    const teacherDeptIds = depts.filter(d => /children|sunday|teacher|youth|education|class/i.test(d.name)).map(d => d.id);
+    const teachers = members.filter(m => m.departmentIds.some(id => teacherDeptIds.includes(id)));
+    targetRecipients = (teachers.length > 0 ? teachers : members.slice(0, 10)).map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
+  } else if (recipientType === 'STAFF') {
+    // Church staff, ministers, pastors, departmental leaders
+    const staffFromUsers = users.map(u => ({ name: u.fullName, phone: u.phone || '' })).filter(u => u.phone.length > 0);
+    const staffFromMembers = members.filter(m => /pastor|minister|leader|elder|deacon|worker|staff/i.test(m.occupation || ''));
+    const combined = [...staffFromUsers, ...staffFromMembers.map(m => ({ name: m.fullName, phone: m.phone }))];
+    targetRecipients = combined.length > 0 ? combined : members.slice(0, 5).map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
+  } else if (recipientType === 'VISITORS') {
+    targetRecipients = visitors.map(v => ({ name: v.fullName, phone: v.phone }));
   } else if (recipientType === 'DEPARTMENT' && req.body.departmentId) {
-    targetRecipients = members.filter(m => m.departmentIds.includes(req.body.departmentId)).map(m => ({ name: m.fullName, phone: m.phone }));
+    targetRecipients = members.filter(m => m.departmentIds.includes(req.body.departmentId)).map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
   } else if (recipientType === 'CUSTOM_LIST' && Array.isArray(recipients)) {
     targetRecipients = recipients;
   } else if (recipientType === 'RAW_NUMBERS' && typeof customNumbers === 'string') {
@@ -947,29 +1198,54 @@ router.post('/sms/send', async (req: AuthenticatedRequest, res: Response) => {
   }
 
   if (targetRecipients.length === 0) {
-    res.status(400).json({ error: 'No valid recipients resolved for this dispatch.' });
+    res.status(400).json({ error: 'No valid recipients selected or resolved for this dispatch.' });
     return;
   }
 
+  // Generate batch transaction token to prevent accidental duplicate dispatch if button clicked twice
+  const batchToken = req.body.clientBatchId || `batch_${Date.now()}`;
   let sent = 0;
   let failed = 0;
+  let skippedNoPhone = 0;
   const results: any[] = [];
 
   for (const item of targetRecipients) {
+    const norm = normalizePhoneNumber(item.phone);
+    if (!norm.isValid) {
+      skippedNoPhone++;
+      failed++;
+      results.push({
+        recipientName: item.name,
+        phone: item.phone || '',
+        status: 'Unable to Send',
+        failureReason: 'Unable to Send — No Valid Phone Number',
+      });
+      continue;
+    }
+
+    const idempotencyKey = `sms_${churchId}_${batchToken}_${item.phone}`;
     try {
       const resSend = await SmsService.sendSms({
         churchId,
         recipientName: item.name,
         phone: item.phone,
         message: message.trim(),
-        notificationType: notificationType || 'BULK_ANNOUNCEMENT',
+        notificationType: notificationType || (recipientType === 'SELECTED_MEMBERS' ? 'MEMBER_UPDATE' : 'BULK_ANNOUNCEMENT'),
+        idempotencyKey,
       });
 
-      if (resSend.success) sent++;
+      if (resSend.success && !resSend.alreadySent) sent++;
+      else if (resSend.alreadySent) sent++; // already dispatched
       else failed++;
       results.push(resSend.smsMessage);
     } catch (err: any) {
       failed++;
+      results.push({
+        recipientName: item.name,
+        phone: item.phone,
+        status: 'Failed',
+        failureReason: err.message || 'Dispatch error',
+      });
     }
   }
 
@@ -978,9 +1254,29 @@ router.post('/sms/send', async (req: AuthenticatedRequest, res: Response) => {
     totalTargeted: targetRecipients.length,
     sent,
     failed,
-    results: results.slice(0, 10),
-    message: `SMS batch processed: ${sent} sent successfully, ${failed} failed/invalid numbers.`,
+    skippedNoPhone,
+    results: results.slice(0, 50),
+    message: `SMS dispatch completed: ${sent} delivered, ${failed} failed (${skippedNoPhone} without valid phone numbers).`,
   });
+});
+
+// Test SMS Gateway Connection endpoint (Requirement 4)
+router.post('/sms/test-connection', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const { apiKey, senderId, testPhone, gateway } = req.body;
+
+  try {
+    const result = await SmsService.testChurchGatewayConnection({
+      churchId,
+      apiKey,
+      senderId,
+      testPhone,
+      gateway,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message || 'Connection test failed' });
+  }
 });
 
 // Dispatch Tithe Reminder SMS (Prompt Requirement 21)
@@ -1037,8 +1333,176 @@ router.post('/sms/tithe-reminders', async (req: AuthenticatedRequest, res: Respo
   });
 });
 
+// Aliases for church communication routes
+router.get('/communication/sms-logs', (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const messages = db.get('smsMessages').filter(s => s.churchId === churchId);
+  // Return messages with delivery status, contribution receipt reference, and failure reason
+  const sanitized = messages.map(m => ({
+    id: m.id,
+    recipientName: m.recipientName,
+    phone: m.phone,
+    normalizedPhone: m.normalizedPhone,
+    senderName: m.senderName,
+    message: m.message,
+    notificationType: m.notificationType,
+    status: m.status,
+    failureReason: m.failureReason,
+    relatedReceiptNumber: m.relatedReceiptNumber,
+    relatedContributionId: m.relatedContributionId,
+    sentAt: m.sentAt || m.createdAt,
+    createdAt: m.createdAt,
+  }));
+  res.json(sanitized);
+});
+
+router.post('/communication/send-sms', async (req: AuthenticatedRequest, res: Response) => {
+  // Re-route to same logic as /sms/send
+  const churchId = getChurchId(req);
+  const { recipientType, recipients, message, notificationType, customNumbers } = req.body;
+
+  if (!message || message.trim().length === 0) {
+    res.status(400).json({ error: 'SMS message body cannot be empty.' });
+    return;
+  }
+
+  const members = db.get('members').filter(m => m.churchId === churchId);
+  const visitors = db.get('visitors').filter(v => v.churchId === churchId);
+  const users = db.get('users').filter(u => u.churchId === churchId);
+  let targetRecipients: Array<{ name: string; phone: string }> = [];
+
+  if (recipientType === 'SELECTED_MEMBERS' && Array.isArray(req.body.memberIds)) {
+    const selectedIds: string[] = req.body.memberIds;
+    const selectedMembers = members.filter(m => selectedIds.includes(m.id));
+    targetRecipients = selectedMembers.map(m => ({ name: m.fullName, phone: m.phone }));
+  } else if (recipientType === 'ALL_MEMBERS') {
+    targetRecipients = members.map(m => ({ name: m.fullName, phone: m.phone }));
+  } else if (recipientType === 'ACTIVE_MEMBERS') {
+    targetRecipients = members.filter(m => m.membershipStatus === 'Active').map(m => ({ name: m.fullName, phone: m.phone }));
+  } else if (recipientType === 'PARENTS') {
+    const parents = members.filter(m => m.familyRole === 'Head' || m.familyRole === 'Spouse' || m.maritalStatus === 'Married');
+    targetRecipients = (parents.length > 0 ? parents : members).map(m => ({ name: m.fullName, phone: m.phone }));
+  } else if (recipientType === 'TEACHERS') {
+    const depts = db.get('departments').filter(d => d.churchId === churchId);
+    const teacherDeptIds = depts.filter(d => /children|sunday|teacher|youth|education|class/i.test(d.name)).map(d => d.id);
+    const teachers = members.filter(m => m.departmentIds.some(id => teacherDeptIds.includes(id)));
+    targetRecipients = (teachers.length > 0 ? teachers : members.slice(0, 10)).map(m => ({ name: m.fullName, phone: m.phone }));
+  } else if (recipientType === 'STAFF') {
+    const staffFromUsers = users.map(u => ({ name: u.fullName, phone: u.phone || '' })).filter(u => u.phone.length > 0);
+    const staffFromMembers = members.filter(m => /pastor|minister|leader|elder|deacon|worker|staff/i.test(m.occupation || ''));
+    const combined = [...staffFromUsers, ...staffFromMembers.map(m => ({ name: m.fullName, phone: m.phone }))];
+    targetRecipients = combined.length > 0 ? combined : members.slice(0, 5).map(m => ({ name: m.fullName, phone: m.phone }));
+  } else if (recipientType === 'VISITORS') {
+    targetRecipients = visitors.map(v => ({ name: v.fullName, phone: v.phone }));
+  } else if (recipientType === 'DEPARTMENT' && req.body.departmentId) {
+    targetRecipients = members.filter(m => m.departmentIds.includes(req.body.departmentId)).map(m => ({ name: m.fullName, phone: m.phone }));
+  } else if (recipientType === 'CUSTOM_LIST' && Array.isArray(recipients)) {
+    targetRecipients = recipients;
+  } else if (recipientType === 'RAW_NUMBERS' && typeof customNumbers === 'string') {
+    const rawList = customNumbers.split(/[\n,;]/).map(n => n.trim()).filter(n => n.length > 0);
+    targetRecipients = rawList.map((p, idx) => ({ name: `Contact ${idx + 1}`, phone: p }));
+  } else if (req.body.phone) {
+    targetRecipients = [{ name: req.body.name || 'Recipient', phone: req.body.phone }];
+  }
+
+  if (targetRecipients.length === 0) {
+    res.status(400).json({ error: 'No valid recipients found.' });
+    return;
+  }
+
+  let sent = 0;
+  let failed = 0;
+  for (const item of targetRecipients) {
+    try {
+      const resSend = await SmsService.sendSms({
+        churchId,
+        recipientName: item.name,
+        phone: item.phone,
+        message: message.trim(),
+        notificationType: notificationType || 'BULK_ANNOUNCEMENT',
+      });
+      if (resSend.success) sent++;
+      else failed++;
+    } catch {
+      failed++;
+    }
+  }
+
+  res.json({
+    success: true,
+    totalTargeted: targetRecipients.length,
+    sent,
+    failed,
+    message: `Dispatched to ${sent} contacts (${failed} failed or invalid).`,
+  });
+});
+
+router.post('/communication/tithe-reminder', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const church = db.get('churches').find(c => c.id === churchId);
+  if (!church) {
+    res.status(404).json({ error: 'Church not found' });
+    return;
+  }
+
+  const members = db.get('members').filter(m => m.churchId === churchId && m.membershipStatus === 'Active');
+  const template = req.body.template || church.settings.titheReminderTemplate ||
+    "Dear [Member Name], this is a friendly reminder regarding your church giving. Thank you for your continued support. — [Church Name]";
+
+  let sent = 0;
+  let skipped = 0;
+
+  for (const member of members) {
+    const msg = template
+      .replace(/\[Member Name\]/g, member.fullName)
+      .replace(/\[Church Name\]/g, church.name);
+
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const idempotencyKey = `tithe_reminder_${churchId}_${member.id}_${currentMonth}`;
+
+    try {
+      const resSend = await SmsService.sendSms({
+        churchId,
+        recipientName: member.fullName,
+        phone: member.phone,
+        message: msg,
+        notificationType: 'GIVING_REMINDER',
+        idempotencyKey,
+      });
+      if (resSend.success && !resSend.alreadySent) {
+        sent++;
+      } else {
+        skipped++;
+      }
+    } catch {
+      skipped++;
+    }
+  }
+
+  res.json({
+    success: true,
+    sent,
+    skipped,
+    message: `Giving reminders processed: ${sent} delivered, ${skipped} skipped.`,
+  });
+});
+
 // GET & PUT Church Settings
 router.get('/settings', (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user;
+  const isAdminOrPastor = user && [
+    'SUPER_ADMIN',
+    'CHURCH_OWNER',
+    'CHURCH_ADMINISTRATOR',
+    'SENIOR_PASTOR',
+    'PASTOR_MINISTER',
+  ].includes(user.role);
+
+  if (!isAdminOrPastor) {
+    res.status(403).json({ error: 'Access denied. Administrator privileges required to access church configuration and API keys.' });
+    return;
+  }
+
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
   if (!church) {
@@ -1061,6 +1525,20 @@ router.get('/settings', (req: AuthenticatedRequest, res: Response) => {
 });
 
 router.put('/settings', (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user;
+  const isAdminOrPastor = user && [
+    'SUPER_ADMIN',
+    'CHURCH_OWNER',
+    'CHURCH_ADMINISTRATOR',
+    'SENIOR_PASTOR',
+    'PASTOR_MINISTER',
+  ].includes(user.role);
+
+  if (!isAdminOrPastor) {
+    res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
+    return;
+  }
+
   const churchId = getChurchId(req);
   const { settings, basicInfo } = req.body;
 

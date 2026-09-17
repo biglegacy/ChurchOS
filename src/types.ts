@@ -43,12 +43,20 @@ export interface Church {
   settings: {
     senderName: string;
     currency: string;
+    smsEnabled?: boolean;
+    smsGateway?: 'Arkesel' | 'Hubtel' | 'mNotify' | 'Twilio';
+    smsApiKey?: string;
+    smsSenderId?: string;
+    allowManualSms?: boolean;
+    autoContributionSmsEnabled?: boolean;
+    autoContributionSmsTypes?: string[];
+    contributionSmsTemplate?: string;
     absenceSmsEnabled: boolean;
     absenceSmsDelayMinutes: number;
     absenceSmsTemplate: string;
     absenceTriggerServices: string[];
-    titheConfirmationSmsEnabled: boolean;
-    titheConfirmationTemplate: string;
+    titheConfirmationSmsEnabled?: boolean;
+    titheConfirmationTemplate?: string;
     titheReminderEnabled: boolean;
     titheReminderTemplate: string;
     titheReminderFrequency: 'weekly' | 'monthly';
@@ -134,7 +142,7 @@ export interface GivingRecord {
   phone?: string;
   amount: number;
   currency: string;
-  givingType: 'Tithe' | 'Offering' | 'First Fruit' | 'Thanksgiving' | 'Building Fund' | 'Missions' | 'Welfare' | 'Special Offering' | 'Donation';
+  givingType: 'Tithe' | 'Offering' | 'First Fruit' | 'Thanksgiving' | 'Building Fund' | 'Missions' | 'Welfare' | 'Special Offering' | 'Special Contributions' | 'Donation' | string;
   date: string;
   paymentMethod: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Cheque';
   referenceNumber: string;
@@ -256,7 +264,9 @@ export interface SmsMessage {
   normalizedPhone: string;
   senderName: string;
   message: string;
-  notificationType: 'ABSENCE_FOLLOWUP' | 'TITHE_CONFIRMATION' | 'GIVING_REMINDER' | 'VISITOR_FOLLOWUP' | 'NEW_MEMBER' | 'BULK_ANNOUNCEMENT' | 'EVENT_REMINDER' | 'CUSTOM' | 'TEST';
+  notificationType: 'CONTRIBUTION_CONFIRMATION' | 'ABSENCE_FOLLOWUP' | 'TITHE_CONFIRMATION' | 'GIVING_REMINDER' | 'VISITOR_FOLLOWUP' | 'NEW_MEMBER' | 'BULK_ANNOUNCEMENT' | 'EVENT_REMINDER' | 'BIRTHDAY_GREETING' | 'CUSTOM' | 'TEST';
+  relatedContributionId?: string;
+  relatedReceiptNumber?: string;
   status: 'Queued' | 'Sending' | 'Accepted' | 'Delivered' | 'Failed' | 'Unable to Send';
   providerResponse?: string;
   providerMessageId?: string;
@@ -264,6 +274,31 @@ export interface SmsMessage {
   idempotencyKey?: string;
   sentAt?: string;
   createdAt: string;
+}
+
+export interface MemberBirthday {
+  memberId: string;
+  fullName: string;
+  phone: string;
+  normalizedPhone?: string;
+  dateOfBirth: string;
+  birthDateFormatted: string;
+  dayOfWeek: string;
+  isToday: boolean;
+  isTomorrow: boolean;
+  daysDiff: number;
+  age?: number;
+  gender: 'Male' | 'Female';
+  departmentIds?: string[];
+  alreadySentToday?: boolean;
+}
+
+export interface UpcomingBirthdaysData {
+  weekRange: string;
+  totalThisWeek: number;
+  todayCount: number;
+  upcomingCount: number;
+  birthdays: MemberBirthday[];
 }
 
 export interface AuditLog {
@@ -274,4 +309,40 @@ export interface AuditLog {
   action: string;
   details: string;
   timestamp: string;
+}
+
+export interface PricingPlan {
+  id: string;
+  name: string;
+  tier: 'starter' | 'growth' | 'enterprise';
+  priceGHS: number;
+  billingFrequency: 'monthly' | 'yearly';
+  smsCreditsIncluded: number;
+  maxMembers: number;
+  features: string[];
+  isPopular?: boolean;
+  isActive: boolean;
+}
+
+export interface PopupMessage {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'announcement' | 'maintenance';
+  targetAudience: 'all' | 'church_admins' | 'members';
+  isActive: boolean;
+  dismissible: boolean;
+  startDate: string;
+  endDate?: string;
+  createdAt: string;
+}
+
+export interface SystemNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'system' | 'billing' | 'sms_gateway' | 'feature';
+  targetAudience: 'all' | 'church_admins' | 'members';
+  sentBy: string;
+  createdAt: string;
 }

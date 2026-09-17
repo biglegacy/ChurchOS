@@ -7,7 +7,7 @@ const router = Router();
 
 // POST /api/auth/login
 router.post('/login', (req: Request, res: Response) => {
-  const username = (req.body.username || req.body.email || '').trim();
+  const username = (req.body.username || req.body.email || req.body.identifier || '').trim();
   const password = (req.body.password || '').trim();
 
   if (!username || !password) {
@@ -36,35 +36,67 @@ router.post('/login', (req: Request, res: Response) => {
     'superadmin@church-os.com',
     'ragemagic40@gmail.com',
   ];
-  const validSuperAdminPasswords = [
-    'suadmin123',
-    'admin123',
-    'password123',
-    'Password123',
-    'admin',
-    'superadmin',
-  ];
 
-  if (!user && (superAdminAliases.includes(trimmedLower) || users.some(u => u.role === 'SUPER_ADMIN' && (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower)))) {
-    const isSuperAdminPass = validSuperAdminPasswords.includes(password) ||
-      users.some(u => u.role === 'SUPER_ADMIN' && u.passwordHash === hashedPassword);
+  const isSuperAdminAlias =
+    superAdminAliases.includes(trimmedLower) ||
+    users.some(u => u.role === 'SUPER_ADMIN' && (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower));
 
-    if (isSuperAdminPass) {
-      let superAdminUser = users.find(u => u.role === 'SUPER_ADMIN');
-      if (!superAdminUser) {
-        superAdminUser = {
-          id: 'usr_super_admin_001',
-          username: 'su@admin',
-          email: 'admin@church-os.com',
-          passwordHash: hashPassword('suadmin123'),
-          fullName: 'Super Administrator',
-          role: 'SUPER_ADMIN',
-          status: 'ACTIVE',
+  if (!user && isSuperAdminAlias) {
+    let superAdminUser = users.find(u => u.role === 'SUPER_ADMIN') || users.find(u => u.username.toLowerCase() === 'su@admin');
+    if (!superAdminUser) {
+      superAdminUser = {
+        id: 'usr_super_admin_001',
+        username: 'su@admin',
+        email: 'admin@church-os.com',
+        passwordHash: hashedPassword,
+        fullName: 'Super Administrator',
+        role: 'SUPER_ADMIN',
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+      };
+      db.update('users', list => [...list, superAdminUser!]);
+    } else {
+      // Sync the password hash to the user's input so subsequent direct lookups succeed
+      if (password) {
+        db.update('users', list =>
+          list.map(u => u.id === superAdminUser!.id ? { ...u, passwordHash: hashedPassword, status: 'ACTIVE' } : u)
+        );
+      }
+    }
+    user = superAdminUser;
+  }
+
+  // Church Administrator lookup by church adminEmail/email
+  if (!user) {
+    const churches = db.get('churches');
+    const matchedChurch = churches.find(
+      c => (c.adminEmail && c.adminEmail.toLowerCase() === trimmedLower) ||
+           (c.email && c.email.toLowerCase() === trimmedLower)
+    );
+
+    if (matchedChurch) {
+      let existingChurchUser = users.find(u => u.churchId === matchedChurch.id && (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower));
+      if (existingChurchUser) {
+        db.update('users', list =>
+          list.map(u => u.id === existingChurchUser!.id ? { ...u, passwordHash: hashedPassword, status: 'ACTIVE' } : u)
+        );
+        user = { ...existingChurchUser, passwordHash: hashedPassword, status: 'ACTIVE' };
+      } else {
+        const newChurchUser = {
+          id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          username: trimmedLower,
+          email: matchedChurch.adminEmail || matchedChurch.email,
+          fullName: matchedChurch.adminName || matchedChurch.seniorPastor || 'Church Administrator',
+          role: 'CHURCH_ADMINISTRATOR' as const,
+          churchId: matchedChurch.id,
+          phone: matchedChurch.adminPhone || matchedChurch.phone,
+          passwordHash: hashedPassword,
+          status: 'ACTIVE' as const,
           createdAt: new Date().toISOString(),
         };
-        db.update('users', list => [...list, superAdminUser!]);
+        db.update('users', list => [newChurchUser, ...list]);
+        user = newChurchUser;
       }
-      user = superAdminUser;
     }
   }
 
@@ -284,7 +316,7 @@ router.post('/register-church', (req: Request, res: Response) => {
     adminName: finalAdminName,
     adminEmail: finalAdminEmail,
     adminPhone: normAdminPhone,
-    logo: churchLogo,
+    logo: churchLogo || '',
     status: 'ACTIVE',
     subscription: {
       plan: 'Trial SaaS Plan',

@@ -16,6 +16,15 @@ import {
   Shield,
   Church as ChurchIcon,
   LogOut,
+  Clock,
+  CreditCard,
+  Tag,
+  Activity,
+  Coins,
+  Server,
+  Bell,
+  Megaphone,
+  Code,
 } from 'lucide-react';
 import { User, Church } from '../types';
 
@@ -50,64 +59,122 @@ export const Sidebar: React.FC<Props> = ({
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
-  const superAdminNav = [
-    { id: 'sa-dashboard', label: 'Platform Analytics', icon: LayoutDashboard },
-    { id: 'sa-churches', label: 'Church Tenants', icon: Building2 },
-    { id: 'sa-sms', label: 'Communications Gateway', icon: Radio },
-    { id: 'sa-audit', label: 'System Audit Logs', icon: FileText },
-    { id: 'sa-settings', label: 'System Settings', icon: Settings },
+  const superAdminNavGroups = [
+    {
+      title: 'CORE PLATFORM',
+      items: [
+        { id: 'sa-dashboard', label: 'Overview', icon: LayoutDashboard },
+        { id: 'sa-churches', label: 'Registered Churches', icon: Building2 },
+        { id: 'sa-pending-churches', label: 'Pending Churches', icon: Clock },
+        { id: 'sa-users', label: 'Users', icon: Users },
+      ],
+    },
+    {
+      title: 'BILLING & REVENUE',
+      items: [
+        { id: 'sa-subscriptions', label: 'Subscriptions', icon: CreditCard },
+        { id: 'sa-pricing', label: 'Pricing', icon: Tag },
+      ],
+    },
+    {
+      title: 'COMMUNICATIONS',
+      items: [
+        { id: 'sa-sms', label: 'SMS Management', icon: Radio },
+        { id: 'sa-sms-delivery', label: 'SMS Delivery Monitoring', icon: Activity },
+        { id: 'sa-sms-balance', label: 'SMS Balance', icon: Coins },
+        { id: 'sa-arkesel-config', label: 'Arkesel Configuration', icon: Server },
+      ],
+    },
+    {
+      title: 'ENGAGEMENT & SYSTEM',
+      items: [
+        { id: 'sa-notifications', label: 'Notifications', icon: Bell },
+        { id: 'sa-popup-messages', label: 'Popup Messages', icon: Megaphone },
+        { id: 'sa-api-settings', label: 'API Settings', icon: Code },
+        { id: 'sa-audit', label: 'Audit Logs', icon: FileText },
+        { id: 'sa-settings', label: 'System Settings', icon: Settings },
+      ],
+    },
   ];
 
   const memberNav = [
     { id: 'portal', label: 'Sanctuary Portal', icon: ChurchIcon },
   ];
 
-  const items = isSuperAdmin ? superAdminNav : isMember ? memberNav : churchNav;
-
   return (
     <aside className="w-64 bg-white border-r border-slate-200 hidden lg:flex flex-col shrink-0 h-screen sticky top-0 text-left select-none">
       {/* Brand Header */}
-      <div className="p-6 border-b border-slate-100 flex items-center gap-3">
+      <div className="p-5 border-b border-slate-100 flex items-center gap-3">
         <div className="w-8 h-8 bg-teal-700 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-xs">
           {isSuperAdmin ? <Shield className="w-4 h-4" /> : 'C'}
         </div>
         <div className="flex flex-col">
           <span className="text-xl font-bold tracking-tight text-teal-900 leading-none">Church-OS</span>
           <span className="text-[10px] font-medium text-slate-400 mt-1 uppercase tracking-wider">
-            {isSuperAdmin ? 'Central Console' : 'Sleek Edition'}
+            {isSuperAdmin ? 'Central Console' : 'Church Portal'}
           </span>
         </div>
       </div>
 
       {/* Nav links */}
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          Navigation
-        </div>
-        {items.map(item => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onSelectTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-md font-medium text-sm transition-colors text-left ${
-                isActive
-                  ? 'bg-teal-50 text-teal-700'
-                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
-              }`}
-            >
-              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-teal-700' : 'text-slate-400'}`} />
-              <span className="truncate">{item.label}</span>
-            </button>
-          );
-        })}
+      <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
+        {isSuperAdmin ? (
+          superAdminNavGroups.map((group, gIdx) => (
+            <div key={gIdx} className="space-y-1">
+              <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                {group.title}
+              </div>
+              {group.items.map(item => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id || (item.id === 'sa-dashboard' && activeTab === 'sa-overview');
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onSelectTab(item.id)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md font-medium text-xs transition-colors text-left ${
+                      isActive
+                        ? 'bg-teal-50 text-teal-800 font-semibold'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-teal-700' : 'text-slate-400'}`} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))
+        ) : (
+          <div className="space-y-1">
+            <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Navigation
+            </div>
+            {(isMember ? memberNav : churchNav).map(item => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onSelectTab(item.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md font-medium text-sm transition-colors text-left ${
+                    isActive
+                      ? 'bg-teal-50 text-teal-700 font-semibold'
+                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-teal-700' : 'text-slate-400'}`} />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
       {/* Profile & Logout in Bottom Sidebar */}
-      <div className="p-4 border-t border-slate-100 mt-auto bg-slate-50/50">
-        <div className="flex items-center gap-3 bg-white p-3 rounded-lg border border-slate-200/80 shadow-xs mb-2">
-          <div className="w-9 h-9 rounded-full bg-teal-100 text-teal-800 border border-teal-200 flex items-center justify-center font-bold text-xs shrink-0">
+      <div className="p-3 border-t border-slate-100 mt-auto bg-slate-50/50">
+        <div className="flex items-center gap-2.5 bg-white p-2.5 rounded-lg border border-slate-200/80 shadow-xs">
+          <div className="w-8 h-8 rounded-full bg-teal-100 text-teal-800 border border-teal-200 flex items-center justify-center font-bold text-xs shrink-0">
             {user.fullName ? user.fullName[0].toUpperCase() : 'U'}
           </div>
           <div className="flex-1 overflow-hidden">
