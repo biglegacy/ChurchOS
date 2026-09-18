@@ -3,12 +3,16 @@ import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { db } from './server/db';
+import { patchViteClient } from './server/patchVite';
 import authRoutes from './server/routes/authRoutes';
 import superAdminRoutes from './server/routes/superAdminRoutes';
 import churchRoutes from './server/routes/churchRoutes';
 import memberRoutes from './server/routes/memberRoutes';
 
 async function startServer() {
+  // Ensure Vite client transport doesn't crash when WebSocket is unavailable in iframe
+  patchViteClient();
+
   // Wait for Firestore to establish connection and load collections
   await db.ready;
 
@@ -58,9 +62,6 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: {
-          server: httpServer,
-        },
       },
       appType: 'spa',
     });

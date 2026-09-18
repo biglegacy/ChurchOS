@@ -22,9 +22,21 @@
       (function() {
         function isViteError(arg) {
           if (!arg) return false;
-          if (typeof arg === 'string' && (arg.indexOf('[vite]') !== -1 || arg.indexOf('websocket') !== -1)) return true;
-          if (arg && typeof arg.message === 'string' && (arg.message.indexOf('[vite]') !== -1 || arg.message.indexOf('websocket') !== -1)) return true;
-          if (arg && arg.target && arg.target instanceof WebSocket) return true;
+          var str = '';
+          try {
+            if (typeof arg === 'string') str = arg;
+            else if (arg && typeof arg.message === 'string') str = arg.message;
+            else if (arg && typeof arg.toString === 'function') str = arg.toString();
+          } catch (_) {}
+          if (
+            str.indexOf('[vite]') !== -1 ||
+            str.indexOf('websocket') !== -1 ||
+            str.indexOf("reading 'send'") !== -1 ||
+            str.indexOf('WebSocket') !== -1
+          ) {
+            return true;
+          }
+          if (arg && arg.target && typeof WebSocket !== 'undefined' && arg.target instanceof WebSocket) return true;
           return false;
         }
 

@@ -68,6 +68,11 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
   const [selectedChurch, setSelectedChurch] = useState<Church | null>(null);
   const [editingChurch, setEditingChurch] = useState<Church | null>(null);
   const [deletingChurch, setDeletingChurch] = useState<Church | null>(null);
+  const [assigningSmsChurch, setAssigningSmsChurch] = useState<Church | null>(null);
+  const [assignUnitsInput, setAssignUnitsInput] = useState('250');
+  const [assignMode, setAssignMode] = useState<'ADD' | 'SET'>('ADD');
+  const [assignReason, setAssignReason] = useState('Admin SMS unit allocation');
+  const [assigningLoading, setAssigningLoading] = useState(false);
   const [showChurchModal, setShowChurchModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showTopUpModal, setShowTopUpModal] = useState(false);
@@ -266,6 +271,36 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
     }
   };
 
+  const handleAssignSmsUnits = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assigningSmsChurch) return;
+    const units = parseInt(assignUnitsInput, 10);
+    if (isNaN(units)) {
+      setError('Please enter a valid numeric amount of SMS units.');
+      return;
+    }
+
+    try {
+      setAssigningLoading(true);
+      setError(null);
+      setActionSuccess(null);
+      const res = await ApiClient.post(`/api/super-admin/churches/${assigningSmsChurch.id}/assign-sms`, {
+        units,
+        mode: assignMode,
+        reason: assignReason,
+      });
+
+      setChurches(prev => prev.map(c => c.id === assigningSmsChurch.id ? res.church : c));
+      setActionSuccess(res.message);
+      setAssigningSmsChurch(null);
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'Failed to assign SMS units to church.');
+    } finally {
+      setAssigningLoading(false);
+    }
+  };
+
   if (loading && !dashboardData) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -393,6 +428,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
                     <th className="py-3 px-4">Members</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4">Modules Enabled</th>
+                    <th className="py-3 px-4">SMS Units</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -437,8 +473,30 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
                           </span>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap min-w-[340px]">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span className="inline-flex items-center space-x-1.5 font-mono font-bold text-xs bg-teal-50 text-teal-800 border border-teal-200 px-2.5 py-1 rounded-md">
+                          <Coins className="w-3.5 h-3.5 text-teal-600" />
+                          <span>{c.smsCredits ?? 0} units</span>
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap min-w-[380px]">
                         <div className="flex items-center justify-end space-x-2">
+                          {/* Assign SMS Units Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAssigningSmsChurch(c);
+                              setAssignUnitsInput('250');
+                              setAssignMode('ADD');
+                              setAssignReason('Admin SMS unit allocation');
+                            }}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer"
+                            title="Assign SMS Units to this Church"
+                          >
+                            <Coins className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Assign SMS</span>
+                          </button>
+
                           {/* Edit Church Button */}
                           <button
                             type="button"
@@ -952,6 +1010,158 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
             loadData();
           }}
         />
+      )}
+
+      {/* Assign SMS Units Modal */}
+      {assigningSmsChurch && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden text-xs text-left animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 bg-teal-900 text-white flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-teal-800 flex items-center justify-center text-teal-200">
+                  <Coins className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white">Assign SMS Units</h3>
+                  <p className="text-[11px] text-teal-200">Multi-tenant church credit allocation</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssigningSmsChurch(null)}
+                className="text-teal-200 hover:text-white p-1 rounded-lg"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAssignSmsUnits} className="p-5 space-y-4">
+              {/* Church Summary */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="font-bold text-slate-900 text-sm">{assigningSmsChurch.name}</span>
+                    <p className="text-[11px] text-slate-500">{assigningSmsChurch.city}, {assigningSmsChurch.country}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold block">Current Balance</span>
+                    <span className="font-mono font-bold text-teal-800 text-sm">
+                      {assigningSmsChurch.smsCredits ?? 0} units
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Mode Selection */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1.5">Allocation Mode</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAssignMode('ADD')}
+                    className={`py-2 px-3 rounded-lg font-bold border transition text-center text-xs ${
+                      assignMode === 'ADD'
+                        ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    + Add to Current
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssignMode('SET')}
+                    className={`py-2 px-3 rounded-lg font-bold border transition text-center text-xs ${
+                      assignMode === 'SET'
+                        ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Set Exact Balance
+                  </button>
+                </div>
+              </div>
+
+              {/* Amount & Quick Buttons */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1.5">
+                  {assignMode === 'ADD' ? 'Number of Units to Add *' : 'Set Exact Total Units *'}
+                </label>
+                <input
+                  type="number"
+                  min={assignMode === 'ADD' ? '-100000' : '0'}
+                  step="1"
+                  required
+                  value={assignUnitsInput}
+                  onChange={e => setAssignUnitsInput(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-700"
+                />
+
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {[50, 100, 250, 500, 1000].map(val => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setAssignUnitsInput(String(val))}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-teal-50 hover:text-teal-800 text-slate-700 rounded-lg text-xs font-semibold transition"
+                    >
+                      +{val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Allocation Reason */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Reason / Reference Note</label>
+                <input
+                  type="text"
+                  value={assignReason}
+                  onChange={e => setAssignReason(e.target.value)}
+                  placeholder="e.g. Monthly allocation, Recharge pack, Promotion"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-700"
+                />
+              </div>
+
+              {/* Balance Preview */}
+              <div className="p-3 bg-teal-50 rounded-xl border border-teal-200 flex items-center justify-between text-xs">
+                <span className="text-teal-900 font-semibold">New Balance After Save:</span>
+                <span className="font-mono font-bold text-teal-950 text-sm">
+                  {assignMode === 'SET'
+                    ? `${Math.max(0, parseInt(assignUnitsInput, 10) || 0)} units`
+                    : `${Math.max(0, (assigningSmsChurch.smsCredits ?? 0) + (parseInt(assignUnitsInput, 10) || 0))} units`}
+                </span>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end space-x-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setAssigningSmsChurch(null)}
+                  disabled={assigningLoading}
+                  className="px-4 py-2 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={assigningLoading || !assignUnitsInput}
+                  className="px-5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl shadow-xs transition flex items-center space-x-2 cursor-pointer disabled:opacity-50"
+                >
+                  {assigningLoading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Coins className="w-3.5 h-3.5" />
+                      <span>Confirm SMS Units</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

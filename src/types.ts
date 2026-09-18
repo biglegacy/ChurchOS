@@ -24,6 +24,7 @@ export interface Church {
   adminPhone: string;
   logo?: string;
   status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED';
+  smsCredits?: number;
   subscription: {
     plan: string;
     status: 'ACTIVE' | 'EXPIRING' | 'EXPIRED';

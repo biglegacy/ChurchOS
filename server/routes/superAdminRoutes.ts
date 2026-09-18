@@ -282,6 +282,57 @@ router.put('/churches/:id', async (req: AuthenticatedRequest, res: Response) => 
   });
 });
 
+// POST /api/super-admin/churches/:id/assign-sms - Allocate or set SMS units for a church
+router.post('/churches/:id/assign-sms', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { units, mode = 'ADD', reason } = req.body;
+
+  const churches = db.get('churches');
+  const church = churches.find(c => c.id === id);
+  if (!church) {
+    res.status(404).json({ error: 'Church not found in database' });
+    return;
+  }
+
+  const parsedUnits = parseInt(units, 10);
+  if (isNaN(parsedUnits)) {
+    res.status(400).json({ error: 'Please provide a valid number of SMS units.' });
+    return;
+  }
+
+  const prevBalance = church.smsCredits ?? 0;
+  const newBalance = mode === 'SET' ? Math.max(0, parsedUnits) : Math.max(0, prevBalance + parsedUnits);
+
+  const updatedChurch: Church = {
+    ...church,
+    smsCredits: newBalance,
+    updatedAt: new Date().toISOString(),
+  };
+
+  db.update('churches', list =>
+    list.map(c => (c.id === id ? updatedChurch : c))
+  );
+  await db.saveDoc('churches', id, updatedChurch);
+
+  const auditEntry = {
+    id: `aud_${Date.now()}`,
+    churchId: id,
+    userId: req.user?.id || 'su@admin',
+    userName: req.user?.fullName || 'Super Admin',
+    action: 'SMS_CREDITS_ASSIGNED',
+    details: `Assigned SMS units to "${church.name}". Previous: ${prevBalance}, ${mode === 'SET' ? `Set directly to ${newBalance}` : `Added ${parsedUnits > 0 ? '+' : ''}${parsedUnits}`}, New Balance: ${newBalance} units. Reason: ${reason || 'Admin allocation'}`,
+    timestamp: new Date().toISOString(),
+  };
+  await db.saveDoc('auditLogs', auditEntry.id, auditEntry);
+
+  res.json({
+    success: true,
+    message: `Assigned ${parsedUnits} SMS units to ${church.name}. New balance: ${newBalance} units.`,
+    church: updatedChurch,
+    smsCredits: newBalance,
+  });
+});
+
 // DELETE /api/super-admin/churches/:id - Hard delete from Firebase with permanent purge
 router.delete('/churches/:id', async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;

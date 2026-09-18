@@ -198,6 +198,7 @@ router.post('/login', (req: Request, res: Response) => {
       features: church.features,
       currency: church.settings.currency,
       logo: church.logo,
+      smsCredits: church.smsCredits ?? 500,
     },
     redirectTo,
   });
@@ -318,6 +319,7 @@ router.post('/register-church', (req: Request, res: Response) => {
     adminPhone: normAdminPhone,
     logo: churchLogo || '',
     status: 'ACTIVE',
+    smsCredits: 500,
     subscription: {
       plan: 'Trial SaaS Plan',
       status: 'ACTIVE',
@@ -436,6 +438,7 @@ router.get('/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
       logo: req.church.logo,
       subscription: req.church.subscription,
       settings: req.church.settings,
+      smsCredits: (req.church.smsCredits !== undefined && req.church.smsCredits !== null) ? req.church.smsCredits : 500,
     } : null,
   });
 });

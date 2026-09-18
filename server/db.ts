@@ -41,6 +41,7 @@ export interface Church {
   adminPhone: string;
   logo?: string;
   status: 'ACTIVE' | 'PENDING' | 'REJECTED' | 'SUSPENDED';
+  smsCredits?: number;
   subscription: {
     plan: string;
     status: 'ACTIVE' | 'EXPIRING' | 'EXPIRED';
@@ -539,11 +540,11 @@ export function getInitialDb(): DatabaseSchema {
     departments: [],
     events: [],
     smsMessages: [],
-    auditLogs: seedAuditLogs,
+    auditLogs: [],
     platformSettings: seedPlatformSettings,
-    pricingPlans: seedPricingPlans,
-    popupMessages: seedPopupMessages,
-    systemNotifications: seedSystemNotifications,
+    pricingPlans: [],
+    popupMessages: [],
+    systemNotifications: [],
   };
 }
 
@@ -624,33 +625,57 @@ class FirebaseDatabase {
       }
 
       // 2. Setup real-time listener for platformSettings
-      onSnapshot(settingsRef, (snap) => {
-        if (snap.exists()) {
-          this.data.platformSettings = snap.data() as CentralPlatformSettings;
+      onSnapshot(
+        settingsRef,
+        (snap) => {
+          if (snap.exists()) {
+            this.data.platformSettings = snap.data() as CentralPlatformSettings;
+          }
+        },
+        (error) => {
+          console.warn('[FirebaseDb] onSnapshot error on platformSettings:', error.message);
         }
-      });
+      );
 
       // 3. Load all collections from Firestore
       const loadPromises = COLLECTION_KEYS.map(async (key) => {
-        const colRef = collection(this.firestore, key);
-        const snap = await getDocs(colRef);
-        const docs: any[] = [];
-        snap.forEach((d) => {
-          docs.push({ id: d.id, ...d.data() });
-        });
-        (this.data[key] as any) = docs;
-
-        // Setup real-time listener for this collection
-        onSnapshot(colRef, (snapshot) => {
-          const liveDocs: any[] = [];
-          snapshot.forEach((d) => {
-            liveDocs.push({ id: d.id, ...d.data() });
+        try {
+          const colRef = collection(this.firestore, key);
+          const snap = await getDocs(colRef);
+          const docs: any[] = [];
+          snap.forEach((d) => {
+            docs.push({ id: d.id, ...d.data() });
           });
-          (this.data[key] as any) = liveDocs;
-        });
+          (this.data[key] as any) = docs;
+
+          // Setup real-time listener for this collection
+          onSnapshot(
+            colRef,
+            (snapshot) => {
+              const liveDocs: any[] = [];
+              snapshot.forEach((d) => {
+                liveDocs.push({ id: d.id, ...d.data() });
+              });
+              (this.data[key] as any) = liveDocs;
+            },
+            (error) => {
+              console.warn(`[FirebaseDb] onSnapshot error on collection "${key}":`, error.message);
+            }
+          );
+        } catch (colErr: any) {
+          console.warn(`[FirebaseDb] Failed loading initial collection "${key}":`, colErr.message);
+        }
       });
 
       await Promise.all(loadPromises);
+
+      // Ensure all churches have valid smsCredits
+      for (const c of this.data.churches) {
+        if (c.smsCredits === undefined || c.smsCredits === null) {
+          c.smsCredits = 500;
+          await this.saveDoc('churches', c.id, c).catch(console.error);
+        }
+      }
 
       // 4. Verify Super Admin exists in Firestore users collection
       const superAdminUser = this.data.users.find((u) => u.role === 'SUPER_ADMIN');

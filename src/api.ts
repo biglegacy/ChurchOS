@@ -47,7 +47,7 @@ export class ApiClient {
     }
   }
 
-  public static async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  public static async request<T = any>(endpoint: string, options: RequestInit = {}, retries = 2): Promise<T> {
     const token = this.getToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -58,10 +58,24 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const res = await fetch(endpoint, {
-      ...options,
-      headers,
-    });
+    let res: Response;
+    try {
+      res = await fetch(endpoint, {
+        ...options,
+        headers,
+      });
+    } catch (networkErr: any) {
+      // If it is a transient network glitch or server reboot, retry once or twice
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 400));
+        return this.request<T>(endpoint, options, retries - 1);
+      }
+      throw new Error(
+        networkErr?.message === 'Failed to fetch'
+          ? 'Unable to connect to Church-OS server. Please check your network connection and retry.'
+          : (networkErr?.message || 'Network request failed.')
+      );
+    }
 
     const data = await res.json().catch(() => ({}));
 

@@ -164,6 +164,7 @@ export default function App() {
 
               {activeTab === 'members' && (
                 <MembersModule
+                  church={church}
                   onRecordGivingForMember={() => setActiveTab('giving')}
                 />
               )}

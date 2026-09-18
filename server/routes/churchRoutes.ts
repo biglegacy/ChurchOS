@@ -468,7 +468,7 @@ router.get('/members/:id', (req: AuthenticatedRequest, res: Response) => {
   });
 });
 
-router.put('/members/:id', (req: AuthenticatedRequest, res: Response) => {
+router.put('/members/:id', async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const updates = req.body;
@@ -482,23 +482,24 @@ router.put('/members/:id', (req: AuthenticatedRequest, res: Response) => {
 
   const norm = updates.phone ? normalizePhoneNumber(updates.phone) : { normalized: existing.normalizedPhone };
 
-  db.update('members', list =>
-    list.map(m => {
-      if (m.id === id && m.churchId === churchId) {
-        return {
-          ...m,
-          ...updates,
-          normalizedPhone: norm.normalized || m.normalizedPhone,
-        };
-      }
-      return m;
-    })
-  );
+  const updatedMember: Member = {
+    ...existing,
+    ...updates,
+    normalizedPhone: norm.normalized || existing.normalizedPhone,
+    dateOfBirth: updates.dateOfBirth !== undefined ? updates.dateOfBirth : existing.dateOfBirth,
+    photoUrl: updates.photoUrl !== undefined ? updates.photoUrl : existing.photoUrl,
+    updatedAt: new Date().toISOString(),
+  };
 
-  res.json({ success: true, message: 'Member updated successfully.' });
+  db.update('members', list =>
+    list.map(m => (m.id === id && m.churchId === churchId ? updatedMember : m))
+  );
+  await db.saveDoc('members', id, updatedMember);
+
+  res.json({ success: true, member: updatedMember, message: 'Member updated successfully.' });
 });
 
-router.delete('/members/:id', (req: AuthenticatedRequest, res: Response) => {
+router.delete('/members/:id', async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
 
@@ -508,7 +509,8 @@ router.delete('/members/:id', (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  db.update('members', list => list.filter(m => !(m.id === id && m.churchId === churchId)));
+  // Delete directly from Firestore & memory
+  await db.deleteDoc('members', id);
 
   db.update('auditLogs', logs => [
     {
@@ -523,7 +525,27 @@ router.delete('/members/:id', (req: AuthenticatedRequest, res: Response) => {
     ...logs.slice(0, 499),
   ]);
 
-  res.json({ success: true, message: 'Member record deleted.' });
+  res.json({ success: true, message: `Member ${member.fullName} deleted successfully.` });
+});
+
+router.post('/members/batch-delete', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const { memberIds } = req.body;
+  if (!Array.isArray(memberIds) || memberIds.length === 0) {
+    res.status(400).json({ error: 'No member IDs provided for deletion.' });
+    return;
+  }
+
+  let deletedCount = 0;
+  for (const id of memberIds) {
+    const mem = db.get('members').find(m => m.id === id && m.churchId === churchId);
+    if (mem) {
+      await db.deleteDoc('members', id);
+      deletedCount++;
+    }
+  }
+
+  res.json({ success: true, deletedCount, message: `Successfully deleted ${deletedCount} member record(s).` });
 });
 
 // ================= FAMILIES ================= //
@@ -1145,8 +1167,8 @@ router.get('/sms/messages', (req: AuthenticatedRequest, res: Response) => {
   res.json(messages);
 });
 
-// Dispatch single or Bulk SMS
-router.post('/sms/send', async (req: AuthenticatedRequest, res: Response) => {
+// Dispatch single or Bulk SMS (Robust recipient resolution and normalization)
+async function handleSmsDispatchCore(req: AuthenticatedRequest, res: Response) {
   const churchId = getChurchId(req);
   const { recipientType, recipients, message, notificationType, customNumbers } = req.body;
 
@@ -1160,26 +1182,119 @@ router.post('/sms/send', async (req: AuthenticatedRequest, res: Response) => {
   const users = db.get('users').filter(u => u.churchId === churchId);
   let targetRecipients: Array<{ name: string; phone: string; memberId?: string }> = [];
 
-  if (recipientType === 'SELECTED_MEMBERS' && Array.isArray(req.body.memberIds)) {
-    const selectedIds: string[] = req.body.memberIds;
-    const selectedMembers = members.filter(m => selectedIds.includes(m.id));
-    targetRecipients = selectedMembers.map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
+  // Gather candidate member IDs from all possible parameter formats
+  const candidateMemberIds: string[] = [];
+  if (Array.isArray(req.body.memberIds)) {
+    candidateMemberIds.push(...req.body.memberIds);
+  }
+  if (Array.isArray(req.body.selectedMemberIds)) {
+    candidateMemberIds.push(...req.body.selectedMemberIds);
+  }
+  if (typeof req.body.memberId === 'string' && req.body.memberId.trim()) {
+    candidateMemberIds.push(req.body.memberId.trim());
+  }
+  if (typeof req.body.recipientMemberId === 'string' && req.body.recipientMemberId.trim()) {
+    candidateMemberIds.push(req.body.recipientMemberId.trim());
+  }
+  if (req.body.member && typeof req.body.member.id === 'string' && req.body.member.id.trim()) {
+    candidateMemberIds.push(req.body.member.id.trim());
+  }
+  if (Array.isArray(recipients)) {
+    for (const r of recipients) {
+      if (typeof r === 'string' && members.some(m => m.id === r)) {
+        candidateMemberIds.push(r);
+      } else if (r && typeof r === 'object') {
+        if (typeof r.memberId === 'string' && r.memberId.trim()) {
+          candidateMemberIds.push(r.memberId.trim());
+        } else if (typeof r.id === 'string' && members.some(m => m.id === r.id)) {
+          candidateMemberIds.push(r.id.trim());
+        }
+      }
+    }
+  }
+
+  const uniqueCandidateMemberIds = Array.from(new Set(candidateMemberIds.filter(Boolean)));
+
+  // If specific members are targeted, or if recipientType indicates selected/single member
+  const isMemberTargeted =
+    recipientType === 'SELECTED_MEMBERS' ||
+    recipientType === 'MEMBER' ||
+    recipientType === 'SINGLE_MEMBER' ||
+    (uniqueCandidateMemberIds.length > 0 &&
+      (!recipientType || recipientType === 'CUSTOM_LIST' || recipientType === 'SELECTED_MEMBERS'));
+
+  if (isMemberTargeted && uniqueCandidateMemberIds.length > 0) {
+    // If a single member is specifically targeted
+    if (uniqueCandidateMemberIds.length === 1) {
+      const targetMemberId = uniqueCandidateMemberIds[0];
+      const member = members.find(m => m.id === targetMemberId);
+      if (!member) {
+        if (!req.body.phone) {
+          res.status(404).json({ error: 'Selected member record was not found in the church database.' });
+          return;
+        }
+      } else {
+        const rawPhone = (member.phone || (member as any).normalizedPhone || '').trim();
+        if (!rawPhone) {
+          res.status(400).json({
+            error: 'This member does not have a registered phone number.',
+            memberId: member.id,
+            memberName: member.fullName,
+          });
+          return;
+        }
+        const norm = normalizePhoneNumber(rawPhone);
+        if (!norm.isValid) {
+          res.status(400).json({
+            error: `This member's registered phone number (${rawPhone}) is invalid: ${norm.error || 'Invalid phone format'}.`,
+            memberId: member.id,
+            memberName: member.fullName,
+          });
+          return;
+        }
+        targetRecipients.push({
+          name: member.fullName,
+          phone: norm.normalized,
+          memberId: member.id,
+        });
+      }
+    } else {
+      // Multiple specific members targeted
+      let withPhone = 0;
+      for (const id of uniqueCandidateMemberIds) {
+        const mem = members.find(m => m.id === id);
+        if (mem) {
+          const rawPhone = (mem.phone || (mem as any).normalizedPhone || '').trim();
+          if (rawPhone) {
+            withPhone++;
+            targetRecipients.push({
+              name: mem.fullName,
+              phone: rawPhone,
+              memberId: mem.id,
+            });
+          }
+        }
+      }
+      if (withPhone === 0 && !req.body.phone && !Array.isArray(recipients)) {
+        res.status(400).json({
+          error: 'None of the selected members have a registered phone number.',
+        });
+        return;
+      }
+    }
   } else if (recipientType === 'ALL_MEMBERS') {
     targetRecipients = members.map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
   } else if (recipientType === 'ACTIVE_MEMBERS') {
     targetRecipients = members.filter(m => m.membershipStatus === 'Active').map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
   } else if (recipientType === 'PARENTS') {
-    // Parents: Head or Spouse of families, or members with family role
     const parents = members.filter(m => m.familyRole === 'Head' || m.familyRole === 'Spouse' || m.maritalStatus === 'Married');
     targetRecipients = (parents.length > 0 ? parents : members).map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
   } else if (recipientType === 'TEACHERS') {
-    // Sunday school teachers, children unit leaders, ministry leaders
     const depts = db.get('departments').filter(d => d.churchId === churchId);
     const teacherDeptIds = depts.filter(d => /children|sunday|teacher|youth|education|class/i.test(d.name)).map(d => d.id);
     const teachers = members.filter(m => m.departmentIds.some(id => teacherDeptIds.includes(id)));
     targetRecipients = (teachers.length > 0 ? teachers : members.slice(0, 10)).map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
   } else if (recipientType === 'STAFF') {
-    // Church staff, ministers, pastors, departmental leaders
     const staffFromUsers = users.map(u => ({ name: u.fullName, phone: u.phone || '' })).filter(u => u.phone.length > 0);
     const staffFromMembers = members.filter(m => /pastor|minister|leader|elder|deacon|worker|staff/i.test(m.occupation || ''));
     const combined = [...staffFromUsers, ...staffFromMembers.map(m => ({ name: m.fullName, phone: m.phone }))];
@@ -1189,21 +1304,78 @@ router.post('/sms/send', async (req: AuthenticatedRequest, res: Response) => {
   } else if (recipientType === 'DEPARTMENT' && req.body.departmentId) {
     targetRecipients = members.filter(m => m.departmentIds.includes(req.body.departmentId)).map(m => ({ name: m.fullName, phone: m.phone, memberId: m.id }));
   } else if (recipientType === 'CUSTOM_LIST' && Array.isArray(recipients)) {
-    targetRecipients = recipients;
+    for (const r of recipients) {
+      if (typeof r === 'string') {
+        const mem = members.find(m => m.id === r);
+        if (mem) {
+          targetRecipients.push({ name: mem.fullName, phone: mem.phone, memberId: mem.id });
+        } else {
+          targetRecipients.push({ name: 'Recipient', phone: r });
+        }
+      } else if (r && typeof r === 'object') {
+        if (r.memberId && !r.phone) {
+          const mem = members.find(m => m.id === r.memberId);
+          if (mem) targetRecipients.push({ name: mem.fullName, phone: mem.phone, memberId: mem.id });
+        } else if (r.phone) {
+          targetRecipients.push({ name: r.name || 'Recipient', phone: r.phone, memberId: r.memberId });
+        }
+      }
+    }
   } else if (recipientType === 'RAW_NUMBERS' && typeof customNumbers === 'string') {
     const rawList = customNumbers.split(/[\n,;]/).map(n => n.trim()).filter(n => n.length > 0);
     targetRecipients = rawList.map((p, idx) => ({ name: `Contact ${idx + 1}`, phone: p }));
   } else if (req.body.phone) {
-    targetRecipients = [{ name: req.body.name || 'Recipient', phone: req.body.phone }];
+    targetRecipients = [{ name: req.body.name || req.body.recipientName || 'Recipient', phone: req.body.phone, memberId: req.body.memberId }];
   }
 
+  // Deduplicate recipients: ensure each member and each normalized phone receives at most one SMS
+  const seenMemberIds = new Set<string>();
+  const seenPhoneKeys = new Set<string>();
+  const deduplicatedRecipients: Array<{ name: string; phone: string; memberId?: string }> = [];
+
+  for (const item of targetRecipients) {
+    const rawPhone = (item.phone || '').trim();
+    if (!rawPhone) continue;
+
+    const norm = normalizePhoneNumber(rawPhone);
+    const phoneKey = norm.isValid ? norm.normalized : rawPhone.replace(/[\s\-\(\)]/g, '');
+
+    if (item.memberId && seenMemberIds.has(item.memberId)) {
+      continue; // Prevent duplicate recipient when same member is selected more than once
+    }
+    if (phoneKey && seenPhoneKeys.has(phoneKey)) {
+      continue; // Prevent duplicate SMS to same mobile handset
+    }
+
+    if (item.memberId) seenMemberIds.add(item.memberId);
+    if (phoneKey) seenPhoneKeys.add(phoneKey);
+
+    deduplicatedRecipients.push({
+      name: item.name,
+      phone: norm.isValid ? norm.normalized : rawPhone,
+      memberId: item.memberId,
+    });
+  }
+  targetRecipients = deduplicatedRecipients;
+
   if (targetRecipients.length === 0) {
+    if (uniqueCandidateMemberIds.length === 1) {
+      res.status(400).json({ error: 'This member does not have a registered phone number.' });
+      return;
+    }
+    if (uniqueCandidateMemberIds.length > 1) {
+      res.status(400).json({ error: 'None of the selected members have a registered phone number.' });
+      return;
+    }
     res.status(400).json({ error: 'No valid recipients selected or resolved for this dispatch.' });
     return;
   }
 
   // Generate batch transaction token to prevent accidental duplicate dispatch if button clicked twice
   const batchToken = req.body.clientBatchId || `batch_${Date.now()}`;
+  const church = db.get('churches').find(c => c.id === churchId);
+  const churchName = church?.name || 'Church';
+
   let sent = 0;
   let failed = 0;
   let skippedNoPhone = 0;
@@ -1218,24 +1390,28 @@ router.post('/sms/send', async (req: AuthenticatedRequest, res: Response) => {
         recipientName: item.name,
         phone: item.phone || '',
         status: 'Unable to Send',
-        failureReason: 'Unable to Send — No Valid Phone Number',
+        failureReason: norm.error || 'Unable to Send — No Valid Phone Number',
       });
       continue;
     }
 
-    const idempotencyKey = `sms_${churchId}_${batchToken}_${item.phone}`;
+    const recipientPersonalizedMessage = message.trim()
+      .replace(/\[Member Name\]/gi, item.name)
+      .replace(/\[Church Name\]/gi, churchName);
+
+    const idempotencyKey = `sms_${churchId}_${batchToken}_${norm.normalized}`;
     try {
       const resSend = await SmsService.sendSms({
         churchId,
         recipientName: item.name,
-        phone: item.phone,
-        message: message.trim(),
+        phone: norm.normalized,
+        message: recipientPersonalizedMessage,
         notificationType: notificationType || (recipientType === 'SELECTED_MEMBERS' ? 'MEMBER_UPDATE' : 'BULK_ANNOUNCEMENT'),
         idempotencyKey,
       });
 
       if (resSend.success && !resSend.alreadySent) sent++;
-      else if (resSend.alreadySent) sent++; // already dispatched
+      else if (resSend.alreadySent) sent++; // already dispatched safely
       else failed++;
       results.push(resSend.smsMessage);
     } catch (err: any) {
@@ -1249,16 +1425,25 @@ router.post('/sms/send', async (req: AuthenticatedRequest, res: Response) => {
     }
   }
 
+  const primaryFailureReason = results.find(r => r.failureReason)?.failureReason;
+  const isOverallSuccess = sent > 0;
+
   res.json({
-    success: true,
+    success: isOverallSuccess,
     totalTargeted: targetRecipients.length,
     sent,
     failed,
     skippedNoPhone,
     results: results.slice(0, 50),
-    message: `SMS dispatch completed: ${sent} delivered, ${failed} failed (${skippedNoPhone} without valid phone numbers).`,
+    failureReason: primaryFailureReason,
+    remainingCredits: church?.smsCredits,
+    message: isOverallSuccess
+      ? `SMS dispatch completed: ${sent} delivered, ${failed} failed (${skippedNoPhone} without valid phone numbers).`
+      : `SMS dispatch failed: 0 delivered, ${failed} failed (${skippedNoPhone} without valid phone numbers). ${primaryFailureReason || ''}`.trim(),
   });
-});
+}
+
+router.post('/sms/send', handleSmsDispatchCore);
 
 // Test SMS Gateway Connection endpoint (Requirement 4)
 router.post('/sms/test-connection', async (req: AuthenticatedRequest, res: Response) => {
@@ -1356,86 +1541,7 @@ router.get('/communication/sms-logs', (req: AuthenticatedRequest, res: Response)
   res.json(sanitized);
 });
 
-router.post('/communication/send-sms', async (req: AuthenticatedRequest, res: Response) => {
-  // Re-route to same logic as /sms/send
-  const churchId = getChurchId(req);
-  const { recipientType, recipients, message, notificationType, customNumbers } = req.body;
-
-  if (!message || message.trim().length === 0) {
-    res.status(400).json({ error: 'SMS message body cannot be empty.' });
-    return;
-  }
-
-  const members = db.get('members').filter(m => m.churchId === churchId);
-  const visitors = db.get('visitors').filter(v => v.churchId === churchId);
-  const users = db.get('users').filter(u => u.churchId === churchId);
-  let targetRecipients: Array<{ name: string; phone: string }> = [];
-
-  if (recipientType === 'SELECTED_MEMBERS' && Array.isArray(req.body.memberIds)) {
-    const selectedIds: string[] = req.body.memberIds;
-    const selectedMembers = members.filter(m => selectedIds.includes(m.id));
-    targetRecipients = selectedMembers.map(m => ({ name: m.fullName, phone: m.phone }));
-  } else if (recipientType === 'ALL_MEMBERS') {
-    targetRecipients = members.map(m => ({ name: m.fullName, phone: m.phone }));
-  } else if (recipientType === 'ACTIVE_MEMBERS') {
-    targetRecipients = members.filter(m => m.membershipStatus === 'Active').map(m => ({ name: m.fullName, phone: m.phone }));
-  } else if (recipientType === 'PARENTS') {
-    const parents = members.filter(m => m.familyRole === 'Head' || m.familyRole === 'Spouse' || m.maritalStatus === 'Married');
-    targetRecipients = (parents.length > 0 ? parents : members).map(m => ({ name: m.fullName, phone: m.phone }));
-  } else if (recipientType === 'TEACHERS') {
-    const depts = db.get('departments').filter(d => d.churchId === churchId);
-    const teacherDeptIds = depts.filter(d => /children|sunday|teacher|youth|education|class/i.test(d.name)).map(d => d.id);
-    const teachers = members.filter(m => m.departmentIds.some(id => teacherDeptIds.includes(id)));
-    targetRecipients = (teachers.length > 0 ? teachers : members.slice(0, 10)).map(m => ({ name: m.fullName, phone: m.phone }));
-  } else if (recipientType === 'STAFF') {
-    const staffFromUsers = users.map(u => ({ name: u.fullName, phone: u.phone || '' })).filter(u => u.phone.length > 0);
-    const staffFromMembers = members.filter(m => /pastor|minister|leader|elder|deacon|worker|staff/i.test(m.occupation || ''));
-    const combined = [...staffFromUsers, ...staffFromMembers.map(m => ({ name: m.fullName, phone: m.phone }))];
-    targetRecipients = combined.length > 0 ? combined : members.slice(0, 5).map(m => ({ name: m.fullName, phone: m.phone }));
-  } else if (recipientType === 'VISITORS') {
-    targetRecipients = visitors.map(v => ({ name: v.fullName, phone: v.phone }));
-  } else if (recipientType === 'DEPARTMENT' && req.body.departmentId) {
-    targetRecipients = members.filter(m => m.departmentIds.includes(req.body.departmentId)).map(m => ({ name: m.fullName, phone: m.phone }));
-  } else if (recipientType === 'CUSTOM_LIST' && Array.isArray(recipients)) {
-    targetRecipients = recipients;
-  } else if (recipientType === 'RAW_NUMBERS' && typeof customNumbers === 'string') {
-    const rawList = customNumbers.split(/[\n,;]/).map(n => n.trim()).filter(n => n.length > 0);
-    targetRecipients = rawList.map((p, idx) => ({ name: `Contact ${idx + 1}`, phone: p }));
-  } else if (req.body.phone) {
-    targetRecipients = [{ name: req.body.name || 'Recipient', phone: req.body.phone }];
-  }
-
-  if (targetRecipients.length === 0) {
-    res.status(400).json({ error: 'No valid recipients found.' });
-    return;
-  }
-
-  let sent = 0;
-  let failed = 0;
-  for (const item of targetRecipients) {
-    try {
-      const resSend = await SmsService.sendSms({
-        churchId,
-        recipientName: item.name,
-        phone: item.phone,
-        message: message.trim(),
-        notificationType: notificationType || 'BULK_ANNOUNCEMENT',
-      });
-      if (resSend.success) sent++;
-      else failed++;
-    } catch {
-      failed++;
-    }
-  }
-
-  res.json({
-    success: true,
-    totalTargeted: targetRecipients.length,
-    sent,
-    failed,
-    message: `Dispatched to ${sent} contacts (${failed} failed or invalid).`,
-  });
-});
+router.post('/communication/send-sms', handleSmsDispatchCore);
 
 router.post('/communication/tithe-reminder', async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
