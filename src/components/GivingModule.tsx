@@ -45,6 +45,7 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
     paymentMethod: 'Cash' as const,
     date: new Date().toISOString().slice(0, 10),
     campaignOrProject: '',
+    recordedBy: ApiClient.getUser()?.fullName || '',
     notes: '',
   });
 
@@ -306,6 +307,7 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
                   <th className="py-3 px-4">Amount</th>
                   <th className="py-3 px-4">Method</th>
                   <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Recorded By</th>
                   <th className="py-3 px-4">SMS Notice</th>
                   <th className="py-3 px-4 text-right">Receipt</th>
                 </tr>
@@ -328,6 +330,9 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
                     </td>
                     <td className="py-3 px-4 text-slate-600">{item.paymentMethod}</td>
                     <td className="py-3 px-4 text-slate-500">{item.date}</td>
+                    <td className="py-3 px-4 text-slate-600 font-medium">
+                      {item.recordedBy || 'Finance Officer'}
+                    </td>
                     <td className="py-3 px-4">
                       {item.smsSent ? (
                         <span className="inline-flex items-center space-x-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
@@ -523,6 +528,19 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
                 </div>
               </div>
 
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Received / Recorded By (Officer Name)
+                </label>
+                <input
+                  type="text"
+                  value={givingForm.recordedBy}
+                  onChange={e => setGivingForm({ ...givingForm, recordedBy: e.target.value })}
+                  placeholder="e.g. Deaconess Mary Annan / Pastor John"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-slate-900 bg-white"
+                />
+              </div>
+
               {givingForm.givingType === 'Tithe' && (
                 <div className="p-3 bg-teal-50/70 rounded-lg border border-teal-100 text-[11px] text-teal-950 leading-snug">
                   <strong>Automatic Tithe Confirmation Engine:</strong> An instant official receipt SMS notification will be automatically delivered to the giver upon recording.
@@ -660,7 +678,7 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-left space-y-4">
             <div className="border-b border-slate-200 pb-3 flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-teal-950">{church?.name || 'Church-OS'}</h3>
+                <h3 className="text-base font-bold text-teal-950">{church?.name || 'Church'}</h3>
                 <p className="text-[10px] text-slate-400 font-mono">OFFICIAL CONTRIBUTION RECEIPT</p>
               </div>
               <button
@@ -691,6 +709,10 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
               <div className="flex justify-between">
                 <span className="text-slate-400">Method:</span>
                 <span className="font-medium text-slate-700">{selectedReceipt.paymentMethod}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Received / Recorded By:</span>
+                <span className="font-semibold text-slate-800">{selectedReceipt.recordedBy || 'Finance Officer'}</span>
               </div>
               <div className="pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-extrabold text-slate-900">
                 <span>Total Received:</span>

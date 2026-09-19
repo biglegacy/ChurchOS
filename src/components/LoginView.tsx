@@ -573,7 +573,7 @@ export const LoginView: React.FC<Props> = ({ onLoginSuccess }) => {
       {/* Footer */}
       <div className="text-center mt-4">
         <p className="text-[11px] text-slate-400 font-medium">
-          Church-OS • Multi-Tenant Church Management
+          ChurchOS • Multi-Tenant Church Management Engine
         </p>
       </div>
 

@@ -18,6 +18,8 @@ import { EventsModule } from './components/EventsModule';
 import { SmsModule } from './components/SmsModule';
 import { ChurchSettingsModule } from './components/ChurchSettingsModule';
 import { MemberPortalView } from './components/MemberPortalView';
+import { ChurchStaffModule } from './components/ChurchStaffModule';
+import { hasPermission } from './types';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(ApiClient.getUser());
@@ -25,6 +27,18 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+
+  const determineInitialTab = (u: User) => {
+    if (u.role === 'SUPER_ADMIN') return 'sa-dashboard';
+    if (u.role === 'MEMBER') return 'portal';
+    if (hasPermission(u, 'view_dashboard')) return 'dashboard';
+    if (hasPermission(u, 'manage_giving')) return 'giving';
+    if (hasPermission(u, 'manage_members')) return 'members';
+    if (hasPermission(u, 'manage_attendance')) return 'attendance';
+    if (hasPermission(u, 'send_sms')) return 'sms';
+    if (hasPermission(u, 'manage_pastoral')) return 'pastoral';
+    return 'dashboard';
+  };
 
   useEffect(() => {
     const verifyAuth = async () => {
@@ -34,13 +48,7 @@ export default function App() {
           const res = await ApiClient.get('/api/auth/me');
           setUser(res.user);
           setChurch(res.church || null);
-          if (res.user.role === 'SUPER_ADMIN') {
-            setActiveTab('sa-dashboard');
-          } else if (res.user.role === 'MEMBER') {
-            setActiveTab('portal');
-          } else {
-            setActiveTab('dashboard');
-          }
+          setActiveTab(determineInitialTab(res.user));
         } catch (err) {
           console.warn('Session expired or invalid token:', err);
           ApiClient.logout();
@@ -57,13 +65,7 @@ export default function App() {
   const handleLoginSuccess = (loggedInUser: User, loggedInChurch: Church | null, redirectTo: string) => {
     setUser(loggedInUser);
     setChurch(loggedInChurch);
-    if (loggedInUser.role === 'SUPER_ADMIN') {
-      setActiveTab('sa-dashboard');
-    } else if (loggedInUser.role === 'MEMBER') {
-      setActiveTab('portal');
-    } else {
-      setActiveTab('dashboard');
-    }
+    setActiveTab(determineInitialTab(loggedInUser));
   };
 
   const handleLogout = () => {
@@ -89,7 +91,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="flex flex-col items-center space-y-3">
           <div className="w-9 h-9 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-xs font-semibold text-slate-500">Initializing Church-OS...</p>
+          <p className="text-xs font-semibold text-slate-500">Initializing ChurchOS...</p>
         </div>
       </div>
     );
@@ -200,6 +202,10 @@ export default function App() {
                 />
               )}
 
+              {activeTab === 'staff' && (
+                <ChurchStaffModule church={church} />
+              )}
+
               {activeTab === 'settings' && (
                 <ChurchSettingsModule
                   church={church}
@@ -212,7 +218,7 @@ export default function App() {
 
         {/* Sleek Footer */}
         <footer className="h-12 bg-white border-t border-slate-200 px-4 sm:px-6 lg:px-8 flex items-center justify-between text-xs text-slate-400 font-medium shrink-0">
-          <p>&copy; {new Date().getFullYear()} Church-OS. Powered by Multi-Tenant Engine</p>
+          <p>&copy; {new Date().getFullYear()} {church?.name || 'ChurchOS'}. Multi-Tenant Secure Engine</p>
           <div className="flex gap-4">
             <span className="hover:text-teal-700 cursor-pointer transition-colors">Support Portal</span>
             <span className="hover:text-teal-700 cursor-pointer transition-colors">System Health</span>

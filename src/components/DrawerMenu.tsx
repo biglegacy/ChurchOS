@@ -26,8 +26,9 @@ import {
   Bell,
   Megaphone,
   Code,
+  ShieldCheck,
 } from 'lucide-react';
-import { User, Church } from '../types';
+import { User, Church, hasPermission, ChurchPermission } from '../types';
 
 interface Props {
   isOpen: boolean;
@@ -56,34 +57,48 @@ export const DrawerMenu: React.FC<Props> = ({
     {
       section: 'Main Operations',
       items: [
-        { id: 'dashboard', label: 'Overview Dashboard', icon: LayoutDashboard },
-        { id: 'members', label: 'Members & Families', icon: Users },
-        { id: 'attendance', label: 'Attendance & Services', icon: CalendarCheck },
-        { id: 'giving', label: 'Tithes & Finances', icon: HandCoins },
+        { id: 'dashboard', label: 'Overview Dashboard', icon: LayoutDashboard, perm: 'view_dashboard' as ChurchPermission },
+        { id: 'members', label: 'Members & Families', icon: Users, perm: 'manage_members' as ChurchPermission },
+        { id: 'attendance', label: 'Attendance & Services', icon: CalendarCheck, perm: 'manage_attendance' as ChurchPermission },
+        { id: 'giving', label: 'Tithes & Finances', icon: HandCoins, perm: 'manage_giving' as ChurchPermission },
       ],
     },
     {
       section: 'Pastoral & Growth',
       items: [
-        { id: 'visitors', label: 'Visitors & Converts', icon: UserPlus },
-        { id: 'pastoral', label: 'Pastoral Care (Confidential)', icon: HeartHandshake },
+        { id: 'visitors', label: 'Visitors & Converts', icon: UserPlus, perm: 'manage_visitors' as ChurchPermission },
+        { id: 'pastoral', label: 'Pastoral Care (Confidential)', icon: HeartHandshake, perm: 'manage_pastoral' as ChurchPermission },
       ],
     },
     {
       section: 'Ministries & Program',
       items: [
-        { id: 'departments', label: 'Departments & Groups', icon: Network },
-        { id: 'events', label: 'Events & Calendar', icon: Calendar },
+        { id: 'departments', label: 'Departments & Groups', icon: Network, perm: 'manage_departments' as ChurchPermission },
+        { id: 'events', label: 'Events & Calendar', icon: Calendar, perm: 'manage_events' as ChurchPermission },
       ],
     },
     {
       section: 'Outreach & Settings',
       items: [
-        { id: 'sms', label: 'SMS Communications Center', icon: MessageSquare },
-        { id: 'settings', label: 'Church Settings', icon: Settings },
+        { id: 'sms', label: 'SMS Communications Center', icon: MessageSquare, perm: 'send_sms' as ChurchPermission },
+        { id: 'staff', label: 'Church Staff & Roles', icon: ShieldCheck, perm: 'manage_staff' as ChurchPermission },
+        { id: 'settings', label: 'Church Settings', icon: Settings, perm: 'manage_settings' as ChurchPermission },
       ],
     },
   ];
+
+  const filteredChurchNavItems = churchNavItems.map(sec => ({
+    ...sec,
+    items: sec.items.filter(item => {
+      if (
+        user.role === 'SUPER_ADMIN' ||
+        user.role === 'CHURCH_OWNER' ||
+        user.role === 'CHURCH_ADMINISTRATOR' ||
+        user.role === 'ADMINISTRATOR'
+      ) return true;
+      return hasPermission(user, item.perm);
+    }),
+  })).filter(sec => sec.items.length > 0);
 
   const superAdminNavItems = [
     {
@@ -123,7 +138,7 @@ export const DrawerMenu: React.FC<Props> = ({
     },
   ];
 
-  const navGroups = isSuperAdmin ? superAdminNavItems : churchNavItems;
+  const navGroups = isSuperAdmin ? superAdminNavItems : filteredChurchNavItems;
 
   const handleItemClick = (id: string) => {
     onSelectTab(id);
@@ -150,10 +165,13 @@ export const DrawerMenu: React.FC<Props> = ({
             </div>
             <div className="overflow-hidden text-left">
               <h3 className="text-sm font-bold text-slate-900 truncate">
-                {isSuperAdmin ? 'Super Admin Console' : church?.name || 'Church-OS'}
+                {isSuperAdmin ? 'Super Admin Console' : church?.name || 'Church'}
               </h3>
               <p className="text-[11px] text-slate-500 truncate">
                 {user.fullName}
+              </p>
+              <p className="text-[10px] text-teal-700 font-semibold truncate capitalize">
+                {user.customRoleTitle || user.role.replace(/_/g, ' ').toLowerCase()}
               </p>
             </div>
           </div>

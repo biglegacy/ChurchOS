@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import { db, User, Church } from './db';
+import { db, User, Church, getDefaultRolePermissions } from './db';
 
 const JWT_SECRET = process.env.APP_SECRET || 'church_os_secret_key_prod_2026';
 
@@ -146,4 +146,39 @@ export function enforceTenant(req: AuthenticatedRequest, res: Response, next: Ne
   }
 
   next();
+}
+
+export function getUserPermissions(user: User): string[] {
+  if (user.role === 'SUPER_ADMIN') return ['*'];
+  if (user.role === 'CHURCH_OWNER' || user.role === 'CHURCH_ADMINISTRATOR' || user.role === 'ADMINISTRATOR') {
+    return ['*'];
+  }
+  if (Array.isArray(user.permissions) && user.permissions.length > 0) {
+    return user.permissions;
+  }
+  return getDefaultRolePermissions(user.role);
+}
+
+export function hasPermission(user: User, permission: string): boolean {
+  if (user.role === 'SUPER_ADMIN') return true;
+  if (user.role === 'CHURCH_OWNER' || user.role === 'CHURCH_ADMINISTRATOR' || user.role === 'ADMINISTRATOR') return true;
+  const perms = getUserPermissions(user);
+  return perms.includes('*') || perms.includes(permission);
+}
+
+export function requirePermission(permission: string) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required. Please log in.' });
+      return;
+    }
+    if (!hasPermission(req.user, permission)) {
+      res.status(403).json({
+        error: `Access denied. Your role (${req.user.customRoleTitle || req.user.role}) is not authorized to access the "${permission}" module.`,
+        requiredPermission: permission,
+      });
+      return;
+    }
+    next();
+  };
 }

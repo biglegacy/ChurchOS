@@ -3,10 +3,142 @@ export interface User {
   username: string;
   email: string;
   fullName: string;
-  role: 'SUPER_ADMIN' | 'CHURCH_OWNER' | 'CHURCH_ADMINISTRATOR' | 'SENIOR_PASTOR' | 'PASTOR_MINISTER' | 'FINANCE_OFFICER' | 'DEPARTMENT_LEADER' | 'GROUP_LEADER' | 'SECRETARY' | 'MEMBER';
+  role:
+    | 'SUPER_ADMIN'
+    | 'CHURCH_OWNER'
+    | 'CHURCH_ADMINISTRATOR'
+    | 'ADMINISTRATOR'
+    | 'SENIOR_PASTOR'
+    | 'PASTOR'
+    | 'ASSISTANT_PASTOR'
+    | 'PASTOR_MINISTER'
+    | 'ACCOUNTANT'
+    | 'TREASURER'
+    | 'FINANCE_OFFICER'
+    | 'SECRETARY'
+    | 'DEPARTMENT_LEADER'
+    | 'GROUP_LEADER'
+    | 'CUSTOM'
+    | 'MEMBER'
+    | string;
+  customRoleTitle?: string;
+  permissions?: string[];
   churchId?: string;
   phone?: string;
-  status: 'ACTIVE' | 'SUSPENDED';
+  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  lastLoginAt?: string;
+}
+
+export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+  SUPER_ADMIN: ['*'],
+  CHURCH_OWNER: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
+  CHURCH_ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
+  ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
+  ACCOUNTANT: ['dashboard', 'giving', 'expenses'],
+  TREASURER: ['dashboard', 'giving', 'expenses'],
+  FINANCE_OFFICER: ['dashboard', 'giving', 'expenses'],
+  PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  SENIOR_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  ASSISTANT_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  PASTOR_MINISTER: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  SECRETARY: ['dashboard', 'members', 'attendance', 'visitors', 'events', 'sms', 'departments'],
+  DEPARTMENT_LEADER: ['dashboard', 'members', 'attendance', 'departments', 'events'],
+  GROUP_LEADER: ['dashboard', 'members', 'attendance', 'departments', 'events'],
+  MEMBER: ['portal'],
+  CUSTOM: ['dashboard'],
+};
+
+export function getDefaultRolePermissions(role: string): string[] {
+  return DEFAULT_ROLE_PERMISSIONS[role] || ['dashboard'];
+}
+
+export type ChurchPermission =
+  | 'view_dashboard'
+  | 'manage_members'
+  | 'manage_attendance'
+  | 'send_sms'
+  | 'manage_giving'
+  | 'manage_visitors'
+  | 'manage_pastoral'
+  | 'manage_departments'
+  | 'manage_events'
+  | 'manage_staff'
+  | 'manage_settings'
+  | 'view_reports';
+
+export type ChurchStaffRole =
+  | 'ACCOUNTANT'
+  | 'PASTOR'
+  | 'ASSISTANT_PASTOR'
+  | 'TREASURER'
+  | 'SECRETARY'
+  | 'FINANCE_OFFICER'
+  | 'ADMINISTRATOR'
+  | 'CUSTOM';
+
+export const ALL_CHURCH_PERMISSIONS: ChurchPermission[] = [
+  'view_dashboard',
+  'manage_members',
+  'manage_attendance',
+  'send_sms',
+  'manage_giving',
+  'manage_visitors',
+  'manage_pastoral',
+  'manage_departments',
+  'manage_events',
+  'manage_staff',
+  'manage_settings',
+  'view_reports',
+];
+
+export function hasPermission(
+  user: { role: string; permissions?: string[] } | null | undefined,
+  permission: string
+): boolean {
+  if (!user) return false;
+  if (
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'CHURCH_OWNER' ||
+    user.role === 'CHURCH_ADMINISTRATOR' ||
+    user.role === 'ADMINISTRATOR'
+  ) return true;
+
+  const userPerms = (user.permissions && user.permissions.length > 0)
+    ? user.permissions
+    : getDefaultRolePermissions(user.role);
+
+  if (userPerms.includes('*') || userPerms.includes(permission)) return true;
+
+  // Also handle alias mapping between short keys ('giving') and full keys ('manage_giving')
+  const aliasMap: Record<string, string[]> = {
+    view_dashboard: ['dashboard'],
+    dashboard: ['view_dashboard'],
+    manage_members: ['members'],
+    members: ['manage_members'],
+    manage_attendance: ['attendance'],
+    attendance: ['manage_attendance'],
+    send_sms: ['sms'],
+    sms: ['send_sms'],
+    manage_giving: ['giving', 'finances'],
+    giving: ['manage_giving'],
+    manage_visitors: ['visitors'],
+    visitors: ['manage_visitors'],
+    manage_pastoral: ['pastoral'],
+    pastoral: ['manage_pastoral'],
+    manage_departments: ['departments'],
+    departments: ['manage_departments'],
+    manage_events: ['events'],
+    events: ['manage_events'],
+    manage_staff: ['staff'],
+    staff: ['manage_staff'],
+    manage_settings: ['settings'],
+    settings: ['manage_settings'],
+    view_reports: ['reports', 'giving'],
+    reports: ['view_reports'],
+  };
+
+  const aliases = aliasMap[permission] || [];
+  return aliases.some(alias => userPerms.includes(alias));
 }
 
 export interface Church {
@@ -25,6 +157,10 @@ export interface Church {
   logo?: string;
   status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED';
   smsCredits?: number;
+  smsAllocatedUnits?: number;
+  smsUnitsUsed?: number;
+  smsPricePerUnit?: number;
+  smsStatus?: 'ACTIVE' | 'DISABLED';
   subscription: {
     plan: string;
     status: 'ACTIVE' | 'EXPIRING' | 'EXPIRED';
@@ -269,12 +405,30 @@ export interface SmsMessage {
   relatedContributionId?: string;
   relatedReceiptNumber?: string;
   status: 'Queued' | 'Sending' | 'Accepted' | 'Delivered' | 'Failed' | 'Unable to Send';
+  unitsDeducted?: number;
+  ratePerUnitGHS?: number;
+  costGHS?: number;
   providerResponse?: string;
   providerMessageId?: string;
   failureReason?: string;
   idempotencyKey?: string;
   sentAt?: string;
   createdAt: string;
+}
+
+export interface SmsUnitAudit {
+  id: string;
+  churchId: string;
+  churchName: string;
+  action: 'ASSIGN' | 'ADD' | 'DEDUCT' | 'PRICE_CHANGE' | 'STATUS_CHANGE';
+  amountChanged?: number;
+  prevUnits: number;
+  newUnits: number;
+  prevPrice?: number;
+  newPrice?: number;
+  reason: string;
+  performedBy: string;
+  timestamp: string;
 }
 
 export interface MemberBirthday {

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { db, hashPassword, User, Church } from '../db';
+import { db, hashPassword, User, Church, getDefaultRolePermissions } from '../db';
 import { createToken, requireAuth, AuthenticatedRequest } from '../auth';
 import { normalizePhoneNumber } from '../smsService';
 
@@ -187,6 +187,8 @@ router.post('/login', (req: Request, res: Response) => {
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      customRoleTitle: user.customRoleTitle,
+      permissions: user.permissions && user.permissions.length > 0 ? user.permissions : getDefaultRolePermissions(user.role),
       churchId: user.churchId,
       status: user.status,
     },
@@ -424,6 +426,8 @@ router.get('/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
       email: req.user.email,
       fullName: req.user.fullName,
       role: req.user.role,
+      customRoleTitle: req.user.customRoleTitle,
+      permissions: req.user.permissions && req.user.permissions.length > 0 ? req.user.permissions : getDefaultRolePermissions(req.user.role),
       churchId: req.user.churchId,
       phone: req.user.phone,
       status: req.user.status,

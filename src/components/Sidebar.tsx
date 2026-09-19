@@ -25,8 +25,9 @@ import {
   Bell,
   Megaphone,
   Code,
+  ShieldCheck,
 } from 'lucide-react';
-import { User, Church } from '../types';
+import { User, Church, hasPermission, ChurchPermission } from '../types';
 
 interface Props {
   activeTab: string;
@@ -46,18 +47,31 @@ export const Sidebar: React.FC<Props> = ({
   const isSuperAdmin = user.role === 'SUPER_ADMIN';
   const isMember = user.role === 'MEMBER';
 
-  const churchNav = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'members', label: 'Members', icon: Users },
-    { id: 'attendance', label: 'Attendance', icon: CalendarCheck },
-    { id: 'sms', label: 'SMS Center', icon: MessageSquare },
-    { id: 'giving', label: 'Finance & Giving', icon: HandCoins },
-    { id: 'visitors', label: 'Visitors & Converts', icon: UserPlus },
-    { id: 'pastoral', label: 'Pastoral Care', icon: HeartHandshake },
-    { id: 'departments', label: 'Departments & Cells', icon: Network },
-    { id: 'events', label: 'Events & Calendar', icon: Calendar },
-    { id: 'settings', label: 'Settings', icon: Settings },
+  const churchNav: Array<{ id: string; label: string; icon: any; perm: ChurchPermission }> = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, perm: 'view_dashboard' },
+    { id: 'members', label: 'Members', icon: Users, perm: 'manage_members' },
+    { id: 'attendance', label: 'Attendance', icon: CalendarCheck, perm: 'manage_attendance' },
+    { id: 'sms', label: 'SMS Center', icon: MessageSquare, perm: 'send_sms' },
+    { id: 'giving', label: 'Finance & Giving', icon: HandCoins, perm: 'manage_giving' },
+    { id: 'visitors', label: 'Visitors & Converts', icon: UserPlus, perm: 'manage_visitors' },
+    { id: 'pastoral', label: 'Pastoral Care', icon: HeartHandshake, perm: 'manage_pastoral' },
+    { id: 'departments', label: 'Departments & Cells', icon: Network, perm: 'manage_departments' },
+    { id: 'events', label: 'Events & Calendar', icon: Calendar, perm: 'manage_events' },
+    { id: 'staff', label: 'Staff & Roles', icon: ShieldCheck, perm: 'manage_staff' },
+    { id: 'settings', label: 'Settings', icon: Settings, perm: 'manage_settings' },
   ];
+
+  const filteredChurchNav = churchNav.filter(item => {
+    if (
+      user.role === 'SUPER_ADMIN' ||
+      user.role === 'CHURCH_OWNER' ||
+      user.role === 'CHURCH_ADMINISTRATOR' ||
+      user.role === 'ADMINISTRATOR'
+    ) {
+      return true;
+    }
+    return hasPermission(user, item.perm);
+  });
 
   const superAdminNavGroups = [
     {
@@ -149,7 +163,7 @@ export const Sidebar: React.FC<Props> = ({
             <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Navigation
             </div>
-            {(isMember ? memberNav : churchNav).map(item => {
+            {(isMember ? memberNav : filteredChurchNav).map(item => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
@@ -179,7 +193,9 @@ export const Sidebar: React.FC<Props> = ({
           </div>
           <div className="flex-1 overflow-hidden">
             <p className="text-xs font-semibold text-slate-900 truncate">{user.fullName}</p>
-            <p className="text-[10px] text-slate-500 truncate capitalize">{user.role.replace(/_/g, ' ').toLowerCase()}</p>
+            <p className="text-[10px] text-teal-700 font-semibold truncate capitalize">
+              {user.customRoleTitle || user.role.replace(/_/g, ' ').toLowerCase()}
+            </p>
           </div>
           <button
             onClick={onLogout}

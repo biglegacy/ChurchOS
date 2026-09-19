@@ -926,7 +926,7 @@ export class SmsService {
 
     const churches = db.get('churches');
     const church = churches.find(c => c.id === churchId);
-    const churchName = church?.name || 'Church-OS';
+    const churchName = church?.name || 'Church';
     const effectiveSender = (senderId || deriveSenderIdFromChurchName(churchName)).slice(0, 11);
     const cleanPhone = norm.normalized.replace(/^\+/, '');
     const testMsg = `[${churchName}] SMS gateway test successful. Your SMS configuration is active and working.`;

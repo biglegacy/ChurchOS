@@ -19,11 +19,54 @@ export interface User {
   email: string;
   passwordHash: string;
   fullName: string;
-  role: 'SUPER_ADMIN' | 'CHURCH_OWNER' | 'CHURCH_ADMINISTRATOR' | 'SENIOR_PASTOR' | 'PASTOR_MINISTER' | 'FINANCE_OFFICER' | 'DEPARTMENT_LEADER' | 'GROUP_LEADER' | 'SECRETARY' | 'MEMBER';
+  role:
+    | 'SUPER_ADMIN'
+    | 'CHURCH_OWNER'
+    | 'CHURCH_ADMINISTRATOR'
+    | 'ADMINISTRATOR'
+    | 'SENIOR_PASTOR'
+    | 'PASTOR'
+    | 'ASSISTANT_PASTOR'
+    | 'PASTOR_MINISTER'
+    | 'ACCOUNTANT'
+    | 'TREASURER'
+    | 'FINANCE_OFFICER'
+    | 'SECRETARY'
+    | 'DEPARTMENT_LEADER'
+    | 'GROUP_LEADER'
+    | 'CUSTOM'
+    | 'MEMBER'
+    | string;
+  customRoleTitle?: string;
+  permissions?: string[];
   churchId?: string; // null for SUPER_ADMIN
   phone?: string;
   status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
   createdAt: string;
+  lastLoginAt?: string;
+}
+
+export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+  SUPER_ADMIN: ['*'],
+  CHURCH_OWNER: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
+  CHURCH_ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
+  ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
+  ACCOUNTANT: ['dashboard', 'giving', 'expenses'],
+  TREASURER: ['dashboard', 'giving', 'expenses'],
+  FINANCE_OFFICER: ['dashboard', 'giving', 'expenses'],
+  PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  SENIOR_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  ASSISTANT_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  PASTOR_MINISTER: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  SECRETARY: ['dashboard', 'members', 'attendance', 'visitors', 'events', 'sms', 'departments'],
+  DEPARTMENT_LEADER: ['dashboard', 'members', 'attendance', 'departments', 'events'],
+  GROUP_LEADER: ['dashboard', 'members', 'attendance', 'departments', 'events'],
+  MEMBER: ['portal'],
+  CUSTOM: ['dashboard'],
+};
+
+export function getDefaultRolePermissions(role: string): string[] {
+  return DEFAULT_ROLE_PERMISSIONS[role] || ['dashboard'];
 }
 
 export interface Church {
@@ -42,6 +85,10 @@ export interface Church {
   logo?: string;
   status: 'ACTIVE' | 'PENDING' | 'REJECTED' | 'SUSPENDED';
   smsCredits?: number;
+  smsAllocatedUnits?: number;
+  smsUnitsUsed?: number;
+  smsPricePerUnit?: number;
+  smsStatus?: 'ACTIVE' | 'DISABLED';
   subscription: {
     plan: string;
     status: 'ACTIVE' | 'EXPIRING' | 'EXPIRED';
@@ -313,12 +360,30 @@ export interface SmsMessage {
   relatedContributionId?: string;
   relatedReceiptNumber?: string;
   status: 'Queued' | 'Sending' | 'Accepted' | 'Delivered' | 'Submitted' | 'Failed' | 'Unable to Send';
+  unitsDeducted?: number;
+  ratePerUnitGHS?: number;
+  costGHS?: number;
   providerResponse?: string;
   providerMessageId?: string;
   failureReason?: string;
   idempotencyKey?: string;
   sentAt?: string;
   createdAt: string;
+}
+
+export interface SmsUnitAudit {
+  id: string;
+  churchId: string;
+  churchName: string;
+  action: 'ASSIGN' | 'ADD' | 'DEDUCT' | 'PRICE_CHANGE' | 'STATUS_CHANGE';
+  amountChanged?: number;
+  prevUnits: number;
+  newUnits: number;
+  prevPrice?: number;
+  newPrice?: number;
+  reason: string;
+  performedBy: string;
+  timestamp: string;
 }
 
 export interface AuditLog {
@@ -403,6 +468,7 @@ export interface DatabaseSchema {
   pricingPlans: PricingPlan[];
   popupMessages: PopupMessage[];
   systemNotifications: SystemNotification[];
+  smsUnitAudits: SmsUnitAudit[];
 }
 
 export function hashPassword(password: string): string {
@@ -545,6 +611,7 @@ export function getInitialDb(): DatabaseSchema {
     pricingPlans: [],
     popupMessages: [],
     systemNotifications: [],
+    smsUnitAudits: [],
   };
 }
 
@@ -568,6 +635,7 @@ const COLLECTION_KEYS: Array<keyof Omit<DatabaseSchema, 'platformSettings'>> = [
   'pricingPlans',
   'popupMessages',
   'systemNotifications',
+  'smsUnitAudits',
 ];
 
 function sanitizeForFirestore<T>(obj: T): T {
@@ -599,9 +667,15 @@ class FirebaseDatabase {
   private isInitialized = false;
 
   constructor() {
-    // Initialize Firebase SDK with application config
-    const app = initializeApp(firebaseConfig);
-    this.firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    // Initialize Firebase SDK with application config and secure env vars
+    const activeConfig = {
+      ...firebaseConfig,
+      apiKey: process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey || '',
+      projectId: process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+      firestoreDatabaseId: process.env.FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId || 'ai-studio-churchos-2b0b1613-9c00-4997-af8c-65b3b5a93def',
+    };
+    const app = initializeApp(activeConfig);
+    this.firestore = getFirestore(app, activeConfig.firestoreDatabaseId);
 
     // Initial in-memory template while Firestore connects
     this.data = getInitialDb();
@@ -669,10 +743,30 @@ class FirebaseDatabase {
 
       await Promise.all(loadPromises);
 
-      // Ensure all churches have valid smsCredits
+      // Ensure all churches have valid smsCredits, allocated units, price, and status
       for (const c of this.data.churches) {
+        let changed = false;
         if (c.smsCredits === undefined || c.smsCredits === null) {
           c.smsCredits = 500;
+          changed = true;
+        }
+        if (c.smsAllocatedUnits === undefined || c.smsAllocatedUnits === null) {
+          c.smsAllocatedUnits = c.smsCredits || 500;
+          changed = true;
+        }
+        if (c.smsUnitsUsed === undefined || c.smsUnitsUsed === null) {
+          c.smsUnitsUsed = 0;
+          changed = true;
+        }
+        if (c.smsPricePerUnit === undefined || c.smsPricePerUnit === null) {
+          c.smsPricePerUnit = 0.05;
+          changed = true;
+        }
+        if (!c.smsStatus) {
+          c.smsStatus = 'ACTIVE';
+          changed = true;
+        }
+        if (changed) {
           await this.saveDoc('churches', c.id, c).catch(console.error);
         }
       }

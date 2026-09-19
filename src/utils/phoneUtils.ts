@@ -128,13 +128,32 @@ export function normalizePhoneNumber(input: string | undefined | null): PhoneVal
 export function detectGhanaNetwork(normalizedPhone: string): string {
   if (!normalizedPhone.startsWith('+233')) return 'International';
   const prefix = normalizedPhone.slice(4, 6);
-  // MTN: 24, 54, 55, 59, 53
-  if (['24', '54', '55', '59', '53'].includes(prefix)) return 'MTN Ghana';
+  // MTN: 24, 25, 54, 55, 59, 53
+  if (['24', '25', '54', '55', '59', '53'].includes(prefix)) return 'MTN Ghana';
   // Telecel / Vodafone: 20, 50
   if (['20', '50'].includes(prefix)) return 'Telecel Ghana';
-  // AT / AirtelTigo: 27, 57, 26
-  if (['27', '57', '26'].includes(prefix)) return 'AT Ghana';
+  // AT (AirtelTigo / Glo): 27, 57, 26, 56, 23
+  if (['27', '57', '26', '56', '23'].includes(prefix)) return 'AT Ghana';
   return 'Ghana Mobile';
+}
+
+/**
+ * Calculates standard SMS units required for a given message text.
+ * Implements standard GSM 03.38 7-bit (160/153 chars) vs Unicode (70/67 chars) rules.
+ */
+export function calculateSmsUnits(message: string): number {
+  if (!message || message.length === 0) return 0;
+  // Check if message contains non-GSM-7 characters (Unicode)
+  const gsmRegex = /^[@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1BÆæßÉ !"#¤%&'()*+,\-.\/0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà\^{}\\[~\]|\u20AC]*$/;
+  const isGsm = gsmRegex.test(message);
+  const len = message.length;
+  if (!isGsm) {
+    // Unicode SMS: 70 chars for single segment, 67 chars per segment for multi-part
+    return len <= 70 ? 1 : Math.ceil(len / 67);
+  } else {
+    // GSM 7-bit SMS: 160 chars for single segment, 153 chars per segment for multi-part
+    return len <= 160 ? 1 : Math.ceil(len / 153);
+  }
 }
 
 export function formatPhoneForDisplay(rawPhone: string | undefined | null): string {

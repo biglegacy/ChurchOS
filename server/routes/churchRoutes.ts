@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent, SmsMessage } from '../db';
+import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent, SmsMessage, User, hashPassword, getDefaultRolePermissions } from '../db';
 import { requireAuth, enforceTenant, AuthenticatedRequest } from '../auth';
 import { SmsService, normalizePhoneNumber } from '../smsService';
 
@@ -925,7 +925,7 @@ router.post('/giving', async (req: AuthenticatedRequest, res: Response) => {
     receiptNumber,
     notes: data.notes,
     smsSent: false,
-    recordedBy: req.user?.fullName || 'Finance Officer',
+    recordedBy: data.recordedBy || req.user?.fullName || 'Finance Officer',
     createdAt: now,
   };
 
@@ -1672,6 +1672,202 @@ router.put('/settings', (req: AuthenticatedRequest, res: Response) => {
   );
 
   res.json({ success: true, message: 'Church settings updated successfully.' });
+});
+
+// ================= CHURCH STAFF & CUSTOM ROLES (Requirements 7, 8, 9, 10) ================= //
+
+// GET /api/church/staff - List all staff for this church
+router.get('/staff', (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  if (!churchId) {
+    res.status(403).json({ error: 'Church ID not identified.' });
+    return;
+  }
+
+  const users = db.get('users').filter(u => u.churchId === churchId);
+  // Return staff without sensitive passwordHash
+  const safeStaff = users.map(u => ({
+    id: u.id,
+    churchId: u.churchId,
+    fullName: u.fullName,
+    username: u.username,
+    email: u.email,
+    phone: u.phone,
+    role: u.role,
+    customRoleTitle: u.customRoleTitle,
+    permissions: (u.permissions && u.permissions.length > 0) ? u.permissions : getDefaultRolePermissions(u.role),
+    status: u.status,
+    createdAt: u.createdAt,
+    lastLoginAt: u.lastLoginAt,
+  }));
+
+  res.json(safeStaff);
+});
+
+// POST /api/church/staff - Create new staff member
+router.post('/staff', (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  if (!churchId) {
+    res.status(403).json({ error: 'Church ID not identified.' });
+    return;
+  }
+
+  const { fullName, username, email, phone, role, customRoleTitle, permissions, password } = req.body;
+
+  if (!fullName || !fullName.trim()) {
+    res.status(400).json({ error: 'Staff member name is required.' });
+    return;
+  }
+
+  if (!username || !username.trim()) {
+    res.status(400).json({ error: 'Login username is required.' });
+    return;
+  }
+
+  if (!password || password.length < 4) {
+    res.status(400).json({ error: 'Login password is required and must be at least 4 characters.' });
+    return;
+  }
+
+  if (!role) {
+    res.status(400).json({ error: 'Assigned role is required.' });
+    return;
+  }
+
+  const cleanUsername = username.trim().toLowerCase();
+  const existingUser = db.get('users').find(u => u.username.toLowerCase() === cleanUsername);
+  if (existingUser) {
+    res.status(400).json({ error: `Username "${cleanUsername}" is already taken. Please choose a different username.` });
+    return;
+  }
+
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (cleanEmail) {
+    const existingEmail = db.get('users').find(u => u.email && u.email.toLowerCase() === cleanEmail);
+    if (existingEmail) {
+      res.status(400).json({ error: `Email "${cleanEmail}" is already in use by another account.` });
+      return;
+    }
+  }
+
+  const assignedPermissions = Array.isArray(permissions) && permissions.length > 0
+    ? permissions
+    : getDefaultRolePermissions(role);
+
+  const newStaffUser: User = {
+    id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    churchId,
+    fullName: fullName.trim(),
+    username: cleanUsername,
+    email: cleanEmail || `${cleanUsername}@church.local`,
+    phone: (phone || '').trim(),
+    role,
+    customRoleTitle: (customRoleTitle || '').trim() || undefined,
+    permissions: assignedPermissions,
+    passwordHash: hashPassword(password),
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
+  };
+
+  db.update('users', list => [...list, newStaffUser]);
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: 'STAFF_CREATED',
+      details: `Created staff member ${newStaffUser.fullName} with role ${newStaffUser.customRoleTitle || newStaffUser.role} (username: ${newStaffUser.username}).`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs,
+  ]);
+
+  const { passwordHash, ...safeUser } = newStaffUser;
+  res.status(201).json({
+    success: true,
+    message: `Staff member ${newStaffUser.fullName} added successfully.`,
+    staff: safeUser,
+  });
+});
+
+// PUT /api/church/staff/:id - Update staff member
+router.put('/staff/:id', (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const staffId = req.params.id;
+
+  const targetUser = db.get('users').find(u => u.id === staffId && u.churchId === churchId);
+  if (!targetUser) {
+    res.status(404).json({ error: 'Staff member not found in this church.' });
+    return;
+  }
+
+  const { fullName, email, phone, role, customRoleTitle, permissions, status, password } = req.body;
+
+  let updatedPasswordHash = targetUser.passwordHash;
+  if (password && password.trim().length >= 4) {
+    updatedPasswordHash = hashPassword(password.trim());
+  }
+
+  const updatedPermissions = Array.isArray(permissions)
+    ? permissions
+    : role ? getDefaultRolePermissions(role) : targetUser.permissions;
+
+  db.update('users', list =>
+    list.map(u => {
+      if (u.id === staffId && u.churchId === churchId) {
+        return {
+          ...u,
+          fullName: fullName !== undefined ? fullName.trim() : u.fullName,
+          email: email !== undefined ? email.trim() : u.email,
+          phone: phone !== undefined ? phone.trim() : u.phone,
+          role: role || u.role,
+          customRoleTitle: customRoleTitle !== undefined ? (customRoleTitle.trim() || undefined) : u.customRoleTitle,
+          permissions: updatedPermissions,
+          status: status || u.status,
+          passwordHash: updatedPasswordHash,
+        };
+      }
+      return u;
+    })
+  );
+
+  const updated = db.get('users').find(u => u.id === staffId);
+  const { passwordHash, ...safeUpdated } = updated!;
+
+  res.json({
+    success: true,
+    message: `Staff member ${safeUpdated.fullName} updated successfully.`,
+    staff: safeUpdated,
+  });
+});
+
+// DELETE /api/church/staff/:id - Remove staff member
+router.delete('/staff/:id', (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const staffId = req.params.id;
+
+  if (staffId === req.user?.id) {
+    res.status(400).json({ error: 'You cannot remove your own active login account.' });
+    return;
+  }
+
+  const targetUser = db.get('users').find(u => u.id === staffId && u.churchId === churchId);
+  if (!targetUser) {
+    res.status(404).json({ error: 'Staff member not found in this church.' });
+    return;
+  }
+
+  if (targetUser.role === 'CHURCH_OWNER' || targetUser.role === 'SUPER_ADMIN') {
+    res.status(403).json({ error: 'Primary church owner account cannot be deleted.' });
+    return;
+  }
+
+  db.update('users', list => list.filter(u => u.id !== staffId));
+
+  res.json({ success: true, message: `Staff member ${targetUser.fullName} removed from church.` });
 });
 
 export default router;
