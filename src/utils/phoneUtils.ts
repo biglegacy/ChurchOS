@@ -20,8 +20,8 @@ export function normalizePhoneNumber(input: string | undefined | null): PhoneVal
     };
   }
 
-  // Remove spaces, hyphens, brackets, dots
-  let cleaned = input.replace(/[\s\-\(\)\.]/g, '').trim();
+  // Remove spaces, hyphens, brackets, dots, commas, slashes, and harmless formatting characters
+  let cleaned = input.replace(/[\s\u00a0\-\(\)\.\/\,\_\#\:\;]/g, '').trim();
 
   // Convert international prefix 00 to +
   if (cleaned.startsWith('00')) {
@@ -52,11 +52,11 @@ export function normalizePhoneNumber(input: string | undefined | null): PhoneVal
     return {
       isValid: false,
       normalized: cleaned,
-      error: 'Phone number length must be between 9 and 15 digits.',
+      error: 'Phone number length must be between 8 and 15 digits.',
     };
   }
 
-  // If starts with 0 (e.g. 024XXXXXXX or 050XXXXXXX, standard Ghana 10-digit mobile)
+  // If starts with 0 (e.g. 020, 050, 024, 054, 055, 059, 026, 027, 056, 057, 025, 053, standard Ghana 10-digit mobile)
   if (cleaned.startsWith('0')) {
     const withoutZero = cleaned.slice(1);
     if (/^\d{9}$/.test(withoutZero)) {
@@ -77,7 +77,7 @@ export function normalizePhoneNumber(input: string | undefined | null): PhoneVal
     }
   }
 
-  // If starts with 233
+  // If starts with 233 (e.g. 233201234567, 233241234567, 233261234567)
   if (cleaned.startsWith('233')) {
     const afterCode = cleaned.slice(3);
     if (afterCode.startsWith('0')) {
@@ -121,19 +121,23 @@ export function normalizePhoneNumber(input: string | undefined | null): PhoneVal
   return {
     isValid: false,
     normalized: cleaned,
-    error: 'Please enter a valid phone number (e.g. 0241234567 or +233241234567).',
+    error: 'Please enter a valid phone number (e.g. 0241234567, 0201234567, or +233241234567).',
   };
 }
 
 export function detectGhanaNetwork(normalizedPhone: string): string {
   if (!normalizedPhone.startsWith('+233')) return 'International';
   const prefix = normalizedPhone.slice(4, 6);
-  // MTN: 24, 25, 54, 55, 59, 53
-  if (['24', '25', '54', '55', '59', '53'].includes(prefix)) return 'MTN Ghana';
-  // Telecel / Vodafone: 20, 50
+  // MTN: 24, 25, 53, 54, 55, 59
+  if (['24', '25', '53', '54', '55', '59'].includes(prefix)) return 'MTN Ghana';
+  // Telecel: 20, 50
   if (['20', '50'].includes(prefix)) return 'Telecel Ghana';
-  // AT (AirtelTigo / Glo): 27, 57, 26, 56, 23
-  if (['27', '57', '26', '56', '23'].includes(prefix)) return 'AT Ghana';
+  // AT (AirtelTigo): 26, 27, 56, 57
+  if (['26', '27', '56', '57'].includes(prefix)) return 'AT Ghana';
+  // Glo / Expresso / Other: 23, 28
+  if (['23', '28'].includes(prefix)) return 'Ghana Mobile';
+  // Ghana fixed lines: 30, 31, 32, 33, 34, 35, 36, 37, 38, 39
+  if (['30', '31', '32', '33', '34', '35', '36', '37', '38', '39'].includes(prefix)) return 'Ghana Fixed/Landline';
   return 'Ghana Mobile';
 }
 

@@ -31,6 +31,7 @@ import {
 import { ApiClient } from '../api';
 import { Member, DepartmentOrGroup, Church } from '../types';
 import { normalizePhoneNumber, formatPhoneForDisplay } from '../utils/phoneUtils';
+import { useMembers } from '../context/MembersContext';
 
 interface Props {
   onRecordGivingForMember?: (memberId: string) => void;
@@ -51,6 +52,7 @@ function calculateAge(dobString?: string): number | null {
 }
 
 export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church }) => {
+  const { refreshMembers } = useMembers();
   const [members, setMembers] = useState<Member[]>([]);
   const [departments, setDepartments] = useState<DepartmentOrGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +82,7 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
   const [showSmsModal, setShowSmsModal] = useState(false);
   const [smsTargetMember, setSmsTargetMember] = useState<Member | null>(null); // null means entire directory
   const [smsMessage, setSmsMessage] = useState(
-    `Beloved [Member Name], grace and peace to you from ${church?.name || '[Church Name]'}. Blessings on your week!`
+    'Beloved [Member Name], grace and peace to you. Blessings on your week!'
   );
   const [sendingSms, setSendingSms] = useState(false);
   const [smsResult, setSmsResult] = useState<{ success: boolean; message: string; failureReason?: string; details?: any } | null>(null);
@@ -219,7 +221,7 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
       }
       setShowAddModal(false);
       resetForm();
-      await loadMembers();
+      await Promise.all([loadMembers(), refreshMembers()]);
     } catch (err: any) {
       setFormError(err.message || 'Failed to save member.');
     } finally {
@@ -239,7 +241,7 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
         setShowDetailModal(false);
       }
       setSelectedMemberIds(prev => prev.filter(id => id !== memberToDelete.id));
-      await loadMembers();
+      await Promise.all([loadMembers(), refreshMembers()]);
     } catch (err: any) {
       setNotice(`Error deleting member: ${err.message}`);
     } finally {
@@ -258,7 +260,7 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
       setNotice(res.message || `${selectedMemberIds.length} members removed.`);
       setSelectedMemberIds([]);
       setShowBatchDeleteModal(false);
-      await loadMembers();
+      await Promise.all([loadMembers(), refreshMembers()]);
     } catch (err: any) {
       setNotice(`Batch delete error: ${err.message}`);
     } finally {
@@ -413,8 +415,14 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
         details: res,
       });
 
+      const submittedCount = res.submitted ?? res.pending ?? (res.delivered !== undefined ? Math.max(0, (res.sent || 0) - (res.delivered || 0)) : (res.sent || 0));
+      const deliveredCount = res.delivered || 0;
       if (isSuccess) {
-        setNotice(`SMS transmission complete: ${res.sent || 0} delivered, ${res.failed || 0} failed.`);
+        if (deliveredCount > 0) {
+          setNotice(`SMS dispatch complete: ${submittedCount} submitted to gateway, ${deliveredCount} confirmed delivered, ${res.failed || 0} failed.`);
+        } else {
+          setNotice(`SMS submitted to gateway: ${submittedCount} in transit (awaiting carrier delivery), ${res.failed || 0} failed.`);
+        }
       } else {
         setNotice(`SMS dispatch failed: ${res.failed || 0} failed. ${reason || ''}`.trim());
       }
@@ -1586,12 +1594,25 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
                     </div>
                   )}
                   {smsResult.details && (
-                    <div className="text-[11px] space-x-2 mt-1">
-                      <span>Targeted: {smsResult.details.totalTargeted}</span> •{' '}
-                      <span className="font-bold text-emerald-700">Delivered: {smsResult.details.sent}</span> •{' '}
-                      <span className={`font-bold ${smsResult.details.failed > 0 ? 'text-rose-700' : 'text-slate-600'}`}>
-                        Failed: {smsResult.details.failed}
-                      </span>
+                    <div className="mt-2 pt-2 border-t border-emerald-200/60 text-[11px] space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                        <span>Targeted: <strong className="text-slate-800">{smsResult.details.totalTargeted || 1}</strong></span>
+                        <span>•</span>
+                        <span className="text-sky-800 font-medium">
+                          Submitted (In Transit): <strong>{smsResult.details.submitted ?? smsResult.details.pending ?? (smsResult.details.delivered !== undefined ? Math.max(0, smsResult.details.sent - smsResult.details.delivered) : smsResult.details.sent)}</strong>
+                        </span>
+                        <span>•</span>
+                        <span className="text-emerald-700 font-medium">
+                          Confirmed Delivered: <strong>{smsResult.details.delivered || 0}</strong>
+                        </span>
+                        <span>•</span>
+                        <span className={`font-medium ${smsResult.details.failed > 0 ? 'text-rose-700 font-bold' : 'text-slate-600'}`}>
+                          Failed: <strong>{smsResult.details.failed || 0}</strong>
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic">
+                        Carrier delivery status updates from Submitted to Delivered when confirmed by recipient&apos;s carrier network (MTN, Telecel, AT).
+                      </p>
                     </div>
                   )}
                 </div>

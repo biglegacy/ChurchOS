@@ -47,6 +47,7 @@ import { SuperAdminPopupMessages } from './superadmin/SuperAdminPopupMessages';
 import { SuperAdminApiSettings } from './superadmin/SuperAdminApiSettings';
 import { SuperAdminAuditLogs } from './superadmin/SuperAdminAuditLogs';
 import { SuperAdminSystemSettings } from './superadmin/SuperAdminSystemSettings';
+import { SuperAdminChurchSmsManager } from './superadmin/SuperAdminChurchSmsManager';
 
 interface Props {
   activeTab: string;
@@ -70,9 +71,10 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
   const [deletingChurch, setDeletingChurch] = useState<Church | null>(null);
   const [assigningSmsChurch, setAssigningSmsChurch] = useState<Church | null>(null);
   const [assignUnitsInput, setAssignUnitsInput] = useState('250');
-  const [assignMode, setAssignMode] = useState<'ADD' | 'SET'>('ADD');
+  const [assignMode, setAssignMode] = useState<'ADD' | 'SET' | 'DEDUCT'>('ADD');
   const [assignReason, setAssignReason] = useState('Admin SMS unit allocation');
   const [assigningLoading, setAssigningLoading] = useState(false);
+  const [smsSubNav, setSmsSubNav] = useState<'church-rates' | 'gateway-config'>('church-rates');
   const [showChurchModal, setShowChurchModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showTopUpModal, setShowTopUpModal] = useState(false);
@@ -82,7 +84,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
   // Test SMS State
   const [testPhone, setTestPhone] = useState('');
   const [testName, setTestName] = useState('Platform Evaluator');
-  const [testMessage, setTestMessage] = useState('Church-OS Central Communications Gateway test message: operational and verified.');
+  const [testMessage, setTestMessage] = useState('SMS Gateway test message: operational and verified.');
   const [testSmsLoading, setTestSmsLoading] = useState(false);
   const [testSmsResult, setTestSmsResult] = useState<any>(null);
 
@@ -284,9 +286,9 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
       setAssigningLoading(true);
       setError(null);
       setActionSuccess(null);
-      const res = await ApiClient.post(`/api/super-admin/churches/${assigningSmsChurch.id}/assign-sms`, {
-        units,
-        mode: assignMode,
+      const res = await ApiClient.post(`/api/super-admin/churches/${assigningSmsChurch.id}/adjust-sms-units`, {
+        units: Math.abs(units),
+        mode: assignMode === 'SET' ? 'ASSIGN' : assignMode,
         reason: assignReason,
       });
 
@@ -600,211 +602,243 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
       {/* 7. SMS MANAGEMENT GATEWAY */}
       {activeTab === 'sa-sms' && (
         <div className="space-y-6">
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base font-bold text-teal-950 flex items-center space-x-2">
-                <Radio className="w-5 h-5 text-teal-700" />
-                <span>Central Communications Gateway</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Centralized SMS infrastructure powering notifications across all church tenants.
-              </p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={handleCheckLiveBalance}
-                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Check Gateway Balance</span>
-              </button>
-              <button
-                onClick={() => setShowTopUpModal(true)}
-                className="px-3.5 py-2 bg-teal-800 hover:bg-teal-900 text-white text-xs font-semibold rounded-lg flex items-center space-x-1.5 transition shadow-xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Top-Up SMS Credits</span>
-              </button>
-            </div>
+          {/* Sub Navigation */}
+          <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-xs flex flex-wrap gap-2 text-xs text-left">
+            <button
+              onClick={() => setSmsSubNav('church-rates')}
+              className={`px-4 py-2 rounded-lg font-bold transition flex items-center space-x-2 cursor-pointer ${
+                smsSubNav === 'church-rates'
+                  ? 'bg-teal-800 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Coins className="w-4 h-4" />
+              <span>Church SMS Pricing & Unit Allocation</span>
+            </button>
+            <button
+              onClick={() => setSmsSubNav('gateway-config')}
+              className={`px-4 py-2 rounded-lg font-bold transition flex items-center space-x-2 cursor-pointer ${
+                smsSubNav === 'gateway-config'
+                  ? 'bg-teal-800 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Server className="w-4 h-4" />
+              <span>Carrier Gateway & Verification</span>
+            </button>
           </div>
 
-          {/* Gateway Status Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs font-semibold text-slate-500">Live Credit Balance</span>
-              <p className="text-3xl font-extrabold text-teal-950 mt-1">
-                {smsBalanceInfo?.balanceCredits?.toLocaleString() || 0}
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Est. Value: GH₵{smsBalanceInfo?.estimatedCostGHS || '0.00'} (@ GH₵{smsBalanceInfo?.costPerSmsGHS}/SMS)
-              </p>
-            </div>
-
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs font-semibold text-slate-500">Gateway Link</span>
-              <div className="flex items-center space-x-2 mt-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-sm font-bold text-slate-900">{smsBalanceInfo?.provider || 'Arkesel Direct Telecom'}</span>
-              </div>
-              <p className="text-[11px] text-emerald-600 font-medium mt-1">
-                Status: {smsBalanceInfo?.connectionStatus || 'CONNECTED_AND_ACTIVE'}
-              </p>
-            </div>
-
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs font-semibold text-slate-500">Platform Delivery Rate</span>
-              <p className="text-3xl font-extrabold text-emerald-700 mt-1">
-                98.6%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Ghana Telecoms: MTN, Telecel, AT Normalized
-              </p>
-            </div>
-          </div>
-
-          {/* Arkesel SMS Configuration Card */}
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs text-left">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 mb-4 border-b border-slate-100">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-                  <Key className="w-4 h-4 text-teal-700" />
-                  <span>Arkesel SMS Gateway Configuration</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Set platform-level Arkesel API credentials to power SMS delivery across all churches.
-                </p>
-              </div>
-              <div className="flex items-center space-x-2">
-                {platformSettings?.hasApiKey || (platformSettings?.apiKey && !platformSettings.apiKey.includes('•')) ? (
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                    <CheckCircle className="w-3.5 h-3.5 mr-1 text-emerald-600" />
-                    API Key Configured
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                    <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600" />
-                    API Key Not Configured
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveSmsSettings} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {smsSubNav === 'church-rates' ? (
+            <SuperAdminChurchSmsManager />
+          ) : (
+            <div className="space-y-6">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-left">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Arkesel API Key *
-                  </label>
-                  <div className="relative">
-                    <Key className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type={showApiKey ? 'text' : 'password'}
-                      value={apiKeyInput}
-                      onChange={e => setApiKeyInput(e.target.value)}
-                      placeholder="Paste Arkesel API Key"
-                      className="w-full pl-9 pr-10 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-700 focus:outline-none"
-                    />
+                  <h2 className="text-base font-bold text-teal-950 flex items-center space-x-2">
+                    <Radio className="w-5 h-5 text-teal-700" />
+                    <span>Central Communications Gateway</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Centralized SMS infrastructure powering notifications across all church tenants.
+                  </p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handleCheckLiveBalance}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Check Gateway Balance</span>
+                  </button>
+                  <button
+                    onClick={() => setShowTopUpModal(true)}
+                    className="px-3.5 py-2 bg-teal-800 hover:bg-teal-900 text-white text-xs font-semibold rounded-lg flex items-center space-x-1.5 transition shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Top-Up SMS Credits</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Gateway Status Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+                  <span className="text-xs font-semibold text-slate-500">Live Credit Balance</span>
+                  <p className="text-3xl font-extrabold text-teal-950 mt-1">
+                    {smsBalanceInfo?.balanceCredits?.toLocaleString() || 0}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Est. Value: GH₵{smsBalanceInfo?.estimatedCostGHS || '0.00'} (@ GH₵{smsBalanceInfo?.costPerSmsGHS}/SMS)
+                  </p>
+                </div>
+
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+                  <span className="text-xs font-semibold text-slate-500">Gateway Link</span>
+                  <div className="flex items-center space-x-2 mt-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-sm font-bold text-slate-900">{smsBalanceInfo?.provider || 'Arkesel Direct Telecom'}</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-600 font-medium mt-1">
+                    Status: {smsBalanceInfo?.connectionStatus || 'CONNECTED_AND_ACTIVE'}
+                  </p>
+                </div>
+
+                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+                  <span className="text-xs font-semibold text-slate-500">Platform Delivery Rate</span>
+                  <p className="text-3xl font-extrabold text-emerald-700 mt-1">
+                    98.6%
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Ghana Telecoms: MTN, Telecel, AT Normalized
+                  </p>
+                </div>
+              </div>
+
+              {/* Arkesel SMS Configuration Card */}
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 mb-4 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
+                      <Key className="w-4 h-4 text-teal-700" />
+                      <span>Arkesel SMS Gateway Configuration</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Set platform-level Arkesel API credentials to power SMS delivery across all churches.
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {platformSettings?.hasApiKey || (platformSettings?.apiKey && !platformSettings.apiKey.includes('•')) ? (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <CheckCircle className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                        API Key Configured
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                        <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600" />
+                        API Key Not Configured
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <form onSubmit={handleSaveSmsSettings} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Arkesel API Key *
+                      </label>
+                      <div className="relative">
+                        <Key className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                        <input
+                          type={showApiKey ? 'text' : 'password'}
+                          value={apiKeyInput}
+                          onChange={e => setApiKeyInput(e.target.value)}
+                          placeholder="Paste Arkesel API Key"
+                          className="w-full pl-9 pr-10 py-2 text-xs font-mono border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-700 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                        >
+                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Obtained from your Arkesel Developer Portal dashboard.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Arkesel Sender ID *
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={11}
+                        value={senderIdInput}
+                        onChange={e => setSenderIdInput(e.target.value.toUpperCase())}
+                        placeholder="e.g. CHURCH-OS"
+                        className="w-full px-3 py-2 text-xs font-mono uppercase border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-700 focus:outline-none"
+                      />
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Up to 11 alphanumeric characters approved on your Arkesel account.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
                     <button
-                      type="button"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 text-xs"
+                      type="submit"
+                      disabled={savingSettings}
+                      className="px-4 py-2 text-xs font-semibold bg-teal-800 hover:bg-teal-900 text-white rounded-lg shadow-xs transition disabled:opacity-50 cursor-pointer"
                     >
-                      {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {savingSettings ? 'Saving Settings...' : 'Save Arkesel Settings'}
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Obtained from your Arkesel Developer Portal dashboard.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Arkesel Sender ID *
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={11}
-                    value={senderIdInput}
-                    onChange={e => setSenderIdInput(e.target.value.toUpperCase())}
-                    placeholder="e.g. CHURCH-OS"
-                    className="w-full px-3 py-2 text-xs font-mono uppercase border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-700 focus:outline-none"
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Up to 11 alphanumeric characters approved on your Arkesel account.
-                  </p>
-                </div>
+                </form>
               </div>
 
-              <div className="flex justify-end pt-2">
-                <button
-                  type="submit"
-                  disabled={savingSettings}
-                  className="px-4 py-2 text-xs font-semibold bg-teal-800 hover:bg-teal-900 text-white rounded-lg shadow-xs transition disabled:opacity-50"
-                >
-                  {savingSettings ? 'Saving Settings...' : 'Save Arkesel Settings'}
-                </button>
-              </div>
-            </form>
-          </div>
+              {/* Test SMS Dispatcher */}
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs text-left">
+                <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center space-x-2">
+                  <Send className="w-4 h-4 text-teal-700" />
+                  <span>Real Gateway SMS Verification</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-4">
+                  Send an instant real test SMS to verify carrier delivery via Arkesel Gateway.
+                </p>
 
-          {/* Test SMS Dispatcher */}
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs text-left">
-            <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center space-x-2">
-              <Send className="w-4 h-4 text-teal-700" />
-              <span>Real Gateway SMS Verification</span>
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Send an instant real test SMS to verify carrier delivery via Arkesel Gateway.
-            </p>
+                <form onSubmit={handleSendTestSms} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Recipient Phone *</label>
+                      <input
+                        type="text"
+                        value={testPhone}
+                        onChange={e => setTestPhone(e.target.value)}
+                        placeholder="e.g. 0201234567, 0241234567, or +233XXXXXXXXX"
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-700 focus:outline-none font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Message Content</label>
+                      <input
+                        type="text"
+                        value={testMessage}
+                        onChange={e => setTestMessage(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-700 focus:outline-none"
+                      />
+                    </div>
+                  </div>
 
-            <form onSubmit={handleSendTestSms} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Recipient Phone *</label>
-                  <input
-                    type="text"
-                    value={testPhone}
-                    onChange={e => setTestPhone(e.target.value)}
-                    placeholder="e.g. 0241234567 or +233501234567"
-                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-700 focus:outline-none font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Message Content</label>
-                  <input
-                    type="text"
-                    value={testMessage}
-                    onChange={e => setTestMessage(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-teal-700 focus:outline-none"
-                  />
-                </div>
-              </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={testSmsLoading}
+                      className="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-900 text-white rounded-lg shadow-xs transition disabled:opacity-50 flex items-center space-x-1.5 cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{testSmsLoading ? 'Dispatching...' : 'Send Live Test SMS'}</span>
+                    </button>
+                  </div>
+                </form>
 
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={testSmsLoading}
-                  className="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-900 text-white rounded-lg shadow-xs transition disabled:opacity-50 flex items-center space-x-1.5"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{testSmsLoading ? 'Dispatching...' : 'Send Live Test SMS'}</span>
-                </button>
-              </div>
-            </form>
-
-            {testSmsResult && (
-              <div className={`mt-3 p-3 rounded-lg border text-xs ${
-                testSmsResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
-              }`}>
-                <p className="font-bold">{testSmsResult.message}</p>
-                {testSmsResult.details && (
-                  <p className="font-mono text-[11px] mt-1 break-all">
-                    {typeof testSmsResult.details === 'string' ? testSmsResult.details : JSON.stringify(testSmsResult.details)}
-                  </p>
+                {testSmsResult && (
+                  <div className={`mt-3 p-3 rounded-lg border text-xs ${
+                    testSmsResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+                  }`}>
+                    <p className="font-bold">{testSmsResult.message}</p>
+                    {testSmsResult.details && (
+                      <p className="font-mono text-[11px] mt-1 break-all">
+                        {typeof testSmsResult.details === 'string' ? testSmsResult.details : JSON.stringify(testSmsResult.details)}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1055,28 +1089,39 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
               {/* Mode Selection */}
               <div>
                 <label className="block font-semibold text-slate-700 mb-1.5">Allocation Mode</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setAssignMode('ADD')}
-                    className={`py-2 px-3 rounded-lg font-bold border transition text-center text-xs ${
+                    className={`py-2 px-2.5 rounded-lg font-bold border transition text-center text-xs cursor-pointer ${
                       assignMode === 'ADD'
                         ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    + Add to Current
+                    + Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssignMode('DEDUCT')}
+                    className={`py-2 px-2.5 rounded-lg font-bold border transition text-center text-xs cursor-pointer ${
+                      assignMode === 'DEDUCT'
+                        ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    - Deduct
                   </button>
                   <button
                     type="button"
                     onClick={() => setAssignMode('SET')}
-                    className={`py-2 px-3 rounded-lg font-bold border transition text-center text-xs ${
+                    className={`py-2 px-2.5 rounded-lg font-bold border transition text-center text-xs cursor-pointer ${
                       assignMode === 'SET'
                         ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    Set Exact Balance
+                    Set Exact
                   </button>
                 </div>
               </div>
@@ -1084,11 +1129,13 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
               {/* Amount & Quick Buttons */}
               <div>
                 <label className="block font-semibold text-slate-700 mb-1.5">
-                  {assignMode === 'ADD' ? 'Number of Units to Add *' : 'Set Exact Total Units *'}
+                  {assignMode === 'ADD' && 'Number of Units to Add *'}
+                  {assignMode === 'DEDUCT' && 'Number of Units to Deduct *'}
+                  {assignMode === 'SET' && 'Set Exact Total Units *'}
                 </label>
                 <input
                   type="number"
-                  min={assignMode === 'ADD' ? '-100000' : '0'}
+                  min="0"
                   step="1"
                   required
                   value={assignUnitsInput}
@@ -1102,9 +1149,9 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
                       key={val}
                       type="button"
                       onClick={() => setAssignUnitsInput(String(val))}
-                      className="px-2.5 py-1 bg-slate-100 hover:bg-teal-50 hover:text-teal-800 text-slate-700 rounded-lg text-xs font-semibold transition"
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-teal-50 hover:text-teal-800 text-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer"
                     >
-                      +{val}
+                      {assignMode === 'DEDUCT' ? `-${val}` : `+${val}`}
                     </button>
                   ))}
                 </div>
@@ -1117,7 +1164,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
                   type="text"
                   value={assignReason}
                   onChange={e => setAssignReason(e.target.value)}
-                  placeholder="e.g. Monthly allocation, Recharge pack, Promotion"
+                  placeholder="e.g. Monthly allocation, Recharge pack, Correction"
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-700"
                 />
               </div>
@@ -1128,6 +1175,8 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
                 <span className="font-mono font-bold text-teal-950 text-sm">
                   {assignMode === 'SET'
                     ? `${Math.max(0, parseInt(assignUnitsInput, 10) || 0)} units`
+                    : assignMode === 'DEDUCT'
+                    ? `${Math.max(0, (assigningSmsChurch.smsCredits ?? 0) - (parseInt(assignUnitsInput, 10) || 0))} units`
                     : `${Math.max(0, (assigningSmsChurch.smsCredits ?? 0) + (parseInt(assignUnitsInput, 10) || 0))} units`}
                 </span>
               </div>

@@ -81,6 +81,10 @@ service cloud.firestore {
       allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
     }
 
+    match /smsUnitAudits/{auditId} {
+      allow read, write: if isSuperAdmin() || request.auth == null;
+    }
+
     // Platform logs, pricing, broadcasts
     match /auditLogs/{logId} {
       allow read, write: if isSuperAdmin() || request.auth == null;

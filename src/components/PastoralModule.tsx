@@ -14,10 +14,12 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { PastoralCareCase, Member } from '../types';
+import { useMembers } from '../context/MembersContext';
+import { MemberSelector } from './common/MemberSelector';
 
 export const PastoralModule: React.FC = () => {
+  const { members } = useMembers();
   const [cases, setCases] = useState<PastoralCareCase[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCase, setSelectedCase] = useState<PastoralCareCase | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -41,12 +43,8 @@ export const PastoralModule: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [cRes, mRes] = await Promise.all([
-        ApiClient.get('/api/church/pastoral-care'),
-        ApiClient.get('/api/church/members?status=Active'),
-      ]);
+      const cRes = await ApiClient.get('/api/church/pastoral-care');
       setCases(cRes);
-      setMembers(mRes);
     } catch (err: any) {
       setError(err.message || 'Failed to load pastoral care.');
     } finally {
@@ -58,23 +56,21 @@ export const PastoralModule: React.FC = () => {
     loadData();
   }, []);
 
-  const handleMemberSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const memId = e.target.value;
-    const member = members.find(m => m.id === memId);
-    if (member) {
-      setFormData({
-        ...formData,
-        memberId: member.id,
-        memberName: member.fullName,
-        phone: member.phone,
-      });
+  const handleMemberSelect = (selected: Member | Member[] | null) => {
+    if (selected && !Array.isArray(selected)) {
+      setFormData(prev => ({
+        ...prev,
+        memberId: selected.id,
+        memberName: selected.fullName,
+        phone: selected.phone || '',
+      }));
     } else {
-      setFormData({
-        ...formData,
+      setFormData(prev => ({
+        ...prev,
         memberId: '',
         memberName: '',
         phone: '',
-      });
+      }));
     }
   };
 
@@ -301,19 +297,25 @@ export const PastoralModule: React.FC = () => {
 
             <form onSubmit={handleCreateCase} className="space-y-3.5 text-xs">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Select Member</label>
-                <select
+                <MemberSelector
+                  label="Select Registered Member"
+                  placeholder="Search registered members by Name, Phone, or ID..."
                   value={formData.memberId}
+                  selectedMember={members.find(m => m.id === formData.memberId) || null}
                   onChange={handleMemberSelect}
-                  className="w-full px-2.5 py-2 border border-slate-200 rounded-md bg-white focus:outline-none focus:border-teal-700"
-                >
-                  <option value="">-- Or enter member manually below --</option>
-                  {members.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.fullName} ({m.phone})
-                    </option>
-                  ))}
-                </select>
+                  allowNonMemberOption={true}
+                  nonMemberLabel="-- Non-Registered Member / Enter Manually --"
+                  isNonMemberSelected={!formData.memberId}
+                  onSelectNonMember={() => {
+                    setFormData(prev => ({
+                      ...prev,
+                      memberId: '',
+                      memberName: '',
+                      phone: '',
+                    }));
+                  }}
+                  helperText="Searchable single source of truth from central Registered Members"
+                />
               </div>
 
               {!formData.memberId && (

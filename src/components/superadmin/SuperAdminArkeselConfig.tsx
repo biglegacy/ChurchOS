@@ -26,7 +26,7 @@ export const SuperAdminArkeselConfig: React.FC = () => {
 
   // Test SMS
   const [testPhone, setTestPhone] = useState('');
-  const [testMessage, setTestMessage] = useState('Church-OS central gateway verification test.');
+  const [testMessage, setTestMessage] = useState('SMS Gateway central verification test.');
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
   const [verifyingGateway, setVerifyingGateway] = useState(false);
@@ -89,7 +89,7 @@ export const SuperAdminArkeselConfig: React.FC = () => {
   const handleSendTestSms = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!testPhone.trim()) {
-      setError('Please provide a test recipient phone number (e.g. 0241234567).');
+      setError('Please provide a test recipient phone number (e.g. 0201234567, 0241234567, 0271234567).');
       return;
     }
     try {
@@ -102,10 +102,10 @@ export const SuperAdminArkeselConfig: React.FC = () => {
       });
       setTestResult({
         success: true,
-        message: res.message || 'Test SMS dispatched successfully!',
+        message: res.message || 'Test SMS submitted to Arkesel successfully (awaiting carrier delivery).',
         details: res.details,
       });
-      setNotice(`Test SMS sent successfully to ${testPhone.trim()}.`);
+      setNotice(res.message || `Test SMS submitted to Arkesel for ${testPhone.trim()} (awaiting carrier delivery).`);
       await loadSettings();
     } catch (err: any) {
       const errMsg = err.message || err.details || 'Test SMS dispatch failed. Check your Arkesel credentials.';
@@ -229,7 +229,9 @@ export const SuperAdminArkeselConfig: React.FC = () => {
                 placeholder="CHURCH-OS"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-700 uppercase font-mono text-xs"
               />
-              <p className="text-[11px] text-slate-400 mt-1">Must be registered with NCA & Ghana telcos.</p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Must be registered with NCA & Ghana telcos. <strong>Note:</strong> Telecel and AirtelTigo enforce strict Sender ID approvals on Arkesel accounts.
+              </p>
             </div>
 
             <div className="pt-2">
@@ -286,14 +288,14 @@ export const SuperAdminArkeselConfig: React.FC = () => {
           <form onSubmit={handleSendTestSms} className="space-y-3 text-xs">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">
-                Recipient Phone (Ghana: e.g. 024XXXXXXX) *
+                Recipient Phone (Ghana: Telecel, MTN, AT, etc.) *
               </label>
               <input
                 type="text"
                 required
                 value={testPhone}
                 onChange={e => setTestPhone(e.target.value)}
-                placeholder="0241234567 or +233501234567"
+                placeholder="0201234567, 0241234567, 0271234567 or +233XXXXXXXXX"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-700 font-mono text-xs"
               />
             </div>

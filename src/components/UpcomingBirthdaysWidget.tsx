@@ -43,7 +43,7 @@ export const UpcomingBirthdaysWidget: React.FC<Props> = ({
   const senderId = church?.settings?.senderName || (church?.name?.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11).toUpperCase() || 'CHURCH');
 
   const defaultGreeting = (memberName: string) =>
-    `Happy Birthday, ${memberName}! 🎉 The leadership and entire family of ${churchName} celebrate the grace and favor of God upon your life today. May this new year overflow with divine blessings, good health, and joy! Have a wonderful celebration. 🎂`;
+    `Happy Birthday, ${memberName}! 🎉 We celebrate the grace and favor of God upon your life today. May this new year overflow with divine blessings, good health, and joy! Have a wonderful celebration. 🎂`;
 
   const fetchBirthdays = async () => {
     try {
@@ -69,7 +69,7 @@ export const UpcomingBirthdaysWidget: React.FC<Props> = ({
       if (res.success) {
         setFeedback({
           type: 'success',
-          message: `Birthday greeting SMS delivered to ${member.fullName} via sender ID "${senderId}".`,
+          message: `Birthday greeting SMS submitted to gateway for ${member.fullName} via sender ID "${senderId}" (pending carrier delivery).`,
         });
 
         // Mark as sent locally

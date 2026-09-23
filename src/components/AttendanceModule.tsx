@@ -16,11 +16,12 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { ChurchService, AttendanceRecord, Member } from '../types';
+import { useMembers } from '../context/MembersContext';
 
 export const AttendanceModule: React.FC = () => {
+  const { members } = useMembers();
   const [services, setServices] = useState<ChurchService[]>([]);
   const [selectedService, setSelectedService] = useState<ChurchService | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,13 +47,8 @@ export const AttendanceModule: React.FC = () => {
   const loadServices = async () => {
     try {
       setLoading(true);
-      const [srvList, memList] = await Promise.all([
-        ApiClient.get('/api/church/services'),
-        ApiClient.get('/api/church/members?status=Active'),
-      ]);
-
+      const srvList = await ApiClient.get('/api/church/services');
       setServices(srvList);
-      setMembers(memList);
 
       if (srvList.length > 0 && !selectedService) {
         setSelectedService(srvList[0]);
@@ -303,7 +299,7 @@ export const AttendanceModule: React.FC = () => {
               <div>
                 <p className="font-bold">Automated Follow-Up Dispatched:</p>
                 <p className="text-emerald-700 mt-0.5">
-                  Identified {finalizationResult.stats?.totalAbsent} absent members: {finalizationResult.stats?.sent} personalized absence SMS delivered successfully. ({finalizationResult.stats?.skipped} duplicate-prevented / invalid numbers).
+                  Identified {finalizationResult.stats?.totalAbsent} absent members: {finalizationResult.stats?.sent} personalized absence SMS submitted to gateway successfully (pending carrier delivery). ({finalizationResult.stats?.skipped} duplicate-prevented / invalid numbers).
                 </p>
               </div>
               <button

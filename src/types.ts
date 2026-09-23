@@ -187,6 +187,10 @@ export interface Church {
     allowManualSms?: boolean;
     autoContributionSmsEnabled?: boolean;
     autoContributionSmsTypes?: string[];
+    customGivingTypes?: string[];
+    customExpenseCategories?: string[];
+    customDepartmentCategories?: string[];
+    customPastoralCategories?: string[];
     contributionSmsTemplate?: string;
     absenceSmsEnabled: boolean;
     absenceSmsDelayMinutes: number;
@@ -296,6 +300,8 @@ export interface ExpenseRecord {
   id: string;
   churchId: string;
   category: string;
+  customCategory?: string;
+  isCustom?: boolean;
   amount: number;
   currency: string;
   date: string;
@@ -342,7 +348,10 @@ export interface NewConvert {
 export interface PastoralCase {
   id: string;
   churchId: string;
+  memberId?: string;
   caseType: string;
+  customCaseType?: string;
+  isCustom?: boolean;
   memberNameOrSubject?: string;
   memberName?: string;
   phone: string;
@@ -366,7 +375,10 @@ export interface DepartmentOrGroup {
   id: string;
   churchId: string;
   name: string;
-  type: 'department' | 'ministry' | 'cell_group';
+  type: 'department' | 'ministry' | 'cell_group' | string;
+  category?: string;
+  customCategory?: string;
+  isCustom?: boolean;
   leaderName: string;
   leaderPhone: string;
   meetingDay?: string;
@@ -377,14 +389,33 @@ export interface DepartmentOrGroup {
   createdAt: string;
 }
 
+export interface ChurchNotification {
+  id: string;
+  churchId?: string;
+  title: string;
+  message: string;
+  category: 'FINANCE' | 'SMS' | 'EVENT' | 'MEMBER' | 'PASTORAL' | 'SYSTEM';
+  severity?: 'info' | 'success' | 'warning' | 'error';
+  isRead: boolean;
+  createdAt: string;
+  linkTab?: string;
+  metadata?: Record<string, any>;
+}
+
 export interface ChurchEvent {
   id: string;
   churchId: string;
   title: string;
+  category?: string;
+  customCategory?: string;
+  isCustom?: boolean;
   date: string;
   startTime: string;
   endTime: string;
   venue: string;
+  guestSpeaker?: string;
+  targetAudience?: string;
+  expectedAttendance?: number;
   description?: string;
   organizer?: string;
   reminderScheduled: boolean;
@@ -392,26 +423,51 @@ export interface ChurchEvent {
   createdAt: string;
 }
 
+export type SmsDeliveryStatus =
+  | 'Submitted'
+  | 'Queued'
+  | 'Pending'
+  | 'Delivered'
+  | 'Not Delivered'
+  | 'Failed'
+  | 'Expired'
+  | 'Prohibited'
+  | 'Unable to Send'
+  | 'Sending'
+  | 'Accepted'
+  | 'Undelivered'
+  | 'Rejected';
+
+export type SmsStatus = SmsDeliveryStatus;
+
 export interface SmsMessage {
   id: string;
   churchId: string;
   churchName?: string;
+  memberId?: string;
   recipientName: string;
   phone: string;
   normalizedPhone: string;
+  recipientPhone?: string;
+  recipientNetwork?: string;
   senderName: string;
   message: string;
-  notificationType: 'CONTRIBUTION_CONFIRMATION' | 'ABSENCE_FOLLOWUP' | 'TITHE_CONFIRMATION' | 'GIVING_REMINDER' | 'VISITOR_FOLLOWUP' | 'NEW_MEMBER' | 'BULK_ANNOUNCEMENT' | 'EVENT_REMINDER' | 'BIRTHDAY_GREETING' | 'CUSTOM' | 'TEST';
+  notificationType: 'CONTRIBUTION_CONFIRMATION' | 'ABSENCE_FOLLOWUP' | 'TITHE_CONFIRMATION' | 'TITHE_REMINDER' | 'GIVING_REMINDER' | 'VISITOR_WELCOME' | 'VISITOR_FOLLOWUP' | 'NEW_MEMBER' | 'BROADCAST' | 'BULK_ANNOUNCEMENT' | 'EVENT_REMINDER' | 'BIRTHDAY_GREETING' | 'CUSTOM' | 'TEST';
   relatedContributionId?: string;
   relatedReceiptNumber?: string;
-  status: 'Queued' | 'Sending' | 'Accepted' | 'Delivered' | 'Failed' | 'Unable to Send';
+  status: SmsDeliveryStatus;
   unitsDeducted?: number;
   ratePerUnitGHS?: number;
   costGHS?: number;
   providerResponse?: string;
+  gatewayResponse?: string;
   providerMessageId?: string;
+  arkeselMessageId?: string;
   failureReason?: string;
   idempotencyKey?: string;
+  submittedAt?: string;
+  deliveredAt?: string;
+  failedAt?: string;
   sentAt?: string;
   createdAt: string;
 }

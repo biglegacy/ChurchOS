@@ -37,6 +37,40 @@ export function patchViteClient() {
         modified = true;
       }
 
+      // 3. Suppress [vite] console.error and unhandled throw on iframe websocket disconnect
+      if (content.includes('error: (err) => console.error("[vite]", err),')) {
+        content = content.replace(
+          'error: (err) => console.error("[vite]", err),',
+          'error: (_err) => { /* benign websocket error suppressed in iframe */ },'
+        );
+        modified = true;
+      }
+
+      if (content.includes('console.error(`[vite] failed to connect to websocket (${e}). `);')) {
+        content = content.replace(
+          'console.error(`[vite] failed to connect to websocket (${e}). `);\n          throw e;',
+          '/* benign iframe websocket disconnect */ return;'
+        );
+        modified = true;
+      }
+
+      if (content.includes('console.error(`[vite] failed to connect to websocket (${e}). `);')) {
+        content = content.replace(
+          'console.error(`[vite] failed to connect to websocket (${e}). `);',
+          '/* benign iframe websocket disconnect */'
+        );
+        modified = true;
+      }
+
+      // 4. Suppress the direct websocket connection error
+      if (content.includes('failed to connect to websocket.your current setup:')) {
+        content = content.replace(
+          /console\.error\(\s*`\[vite\] failed to connect to websocket\.your current setup:[\s\S]*?`\s*\);/g,
+          '/* benign websocket setup error suppressed in iframe */'
+        );
+        modified = true;
+      }
+
       if (modified) {
         fs.writeFileSync(clientPath, content, 'utf-8');
         console.log('[Church-OS] Successfully applied null-safety patch to Vite client transport.');

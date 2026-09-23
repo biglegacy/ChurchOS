@@ -305,40 +305,6 @@ export const LoginView: React.FC<Props> = ({ onLoginSuccess }) => {
                   </>
                 )}
               </button>
-
-              {/* Quick Demo Access */}
-              <div className="pt-2.5 border-t border-slate-100">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Quick Demo Credentials:</span>
-                  <span className="text-[10px] text-slate-400">Click to fill</span>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUsername('su@admin');
-                      setPassword('password123');
-                      setError(null);
-                    }}
-                    className="p-1.5 text-left border border-slate-200 rounded-md hover:border-teal-700 hover:bg-teal-50/50 text-[11px] text-slate-700 transition cursor-pointer"
-                  >
-                    <span className="font-bold text-teal-900 block">Super Admin</span>
-                    <span className="text-slate-500 font-mono text-[10px]">su@admin</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUsername('pastor.joshua@trinitybaptist.org');
-                      setPassword('password123');
-                      setError(null);
-                    }}
-                    className="p-1.5 text-left border border-slate-200 rounded-md hover:border-teal-700 hover:bg-teal-50/50 text-[11px] text-slate-700 transition cursor-pointer"
-                  >
-                    <span className="font-bold text-teal-900 block">Church Pastor</span>
-                    <span className="text-slate-500 font-mono text-[10px]">pastor.joshua...</span>
-                  </button>
-                </div>
-              </div>
             </form>
           ) : (
             /* REGISTER CHURCH FORM */

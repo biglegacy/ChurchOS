@@ -8,6 +8,7 @@ import authRoutes from './server/routes/authRoutes';
 import superAdminRoutes from './server/routes/superAdminRoutes';
 import churchRoutes from './server/routes/churchRoutes';
 import memberRoutes from './server/routes/memberRoutes';
+import webhookRoutes from './server/routes/webhookRoutes';
 
 async function startServer() {
   // Ensure Vite client transport doesn't crash when WebSocket is unavailable in iframe
@@ -42,6 +43,7 @@ async function startServer() {
   app.use('/api/super-admin', superAdminRoutes);
   app.use('/api/church', churchRoutes);
   app.use('/api/member', memberRoutes);
+  app.use('/api/webhooks', webhookRoutes);
 
   // 404 handler for unhandled API routes
   app.all('/api/*', (_req: Request, res: Response) => {

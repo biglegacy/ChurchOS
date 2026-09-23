@@ -14,8 +14,10 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { Visitor, NewConvert } from '../types';
+import { useMembers } from '../context/MembersContext';
 
 export const VisitorsModule: React.FC = () => {
+  const { refreshMembers } = useMembers();
   const [activeTab, setActiveTab] = useState<'visitors' | 'converts'>('visitors');
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [converts, setConverts] = useState<NewConvert[]>([]);
@@ -123,7 +125,7 @@ export const VisitorsModule: React.FC = () => {
     try {
       const res = await ApiClient.post(`/api/church/visitors/${visitor.id}/convert-to-member`);
       setNotice(res.message);
-      await loadData();
+      await Promise.all([loadData(), refreshMembers()]);
     } catch (err: any) {
       setError(err.message);
     }

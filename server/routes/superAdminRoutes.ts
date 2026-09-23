@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
-import { db, Church, User, hashPassword, PricingPlan, PopupMessage, SystemNotification } from '../db';
+import { db, Church, User, hashPassword, PricingPlan, PopupMessage, SystemNotification, SmsUnitAudit } from '../db';
 import { requireAuth, requireSuperAdmin, AuthenticatedRequest } from '../auth';
-import { SmsService } from '../smsService';
+import { SmsService, getGhanaianNetwork } from '../smsService';
 
 const router = Router();
 
@@ -302,10 +302,15 @@ router.post('/churches/:id/assign-sms', async (req: AuthenticatedRequest, res: R
 
   const prevBalance = church.smsCredits ?? 0;
   const newBalance = mode === 'SET' ? Math.max(0, parsedUnits) : Math.max(0, prevBalance + parsedUnits);
+  const updatedAllocated = mode === 'SET' 
+    ? Math.max(church.smsAllocatedUnits ?? prevBalance, newBalance)
+    : (church.smsAllocatedUnits ?? prevBalance) + (parsedUnits > 0 ? parsedUnits : 0);
 
   const updatedChurch: Church = {
     ...church,
     smsCredits: newBalance,
+    smsAllocatedUnits: updatedAllocated,
+    smsUnitsUsed: church.smsUnitsUsed ?? 0,
     updatedAt: new Date().toISOString(),
   };
 
@@ -325,12 +330,278 @@ router.post('/churches/:id/assign-sms', async (req: AuthenticatedRequest, res: R
   };
   await db.saveDoc('auditLogs', auditEntry.id, auditEntry);
 
+  const unitAuditId = `sua_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const unitAudit: SmsUnitAudit = {
+    id: unitAuditId,
+    churchId: id,
+    churchName: church.name,
+    action: mode === 'SET' ? 'ASSIGN' : (parsedUnits >= 0 ? 'ADD' : 'DEDUCT'),
+    amountChanged: mode === 'SET' ? newBalance - prevBalance : parsedUnits,
+    prevUnits: prevBalance,
+    newUnits: newBalance,
+    reason: reason || 'Super Admin allocation',
+    performedBy: req.user?.fullName || req.user?.email || 'Super Admin',
+    timestamp: new Date().toISOString(),
+  };
+  db.update('smsUnitAudits', list => [unitAudit, ...list]);
+  await db.saveDoc('smsUnitAudits', unitAuditId, unitAudit);
+
   res.json({
     success: true,
     message: `Assigned ${parsedUnits} SMS units to ${church.name}. New balance: ${newBalance} units.`,
     church: updatedChurch,
     smsCredits: newBalance,
   });
+});
+
+// POST /api/super-admin/churches/:id/adjust-sms-units - Robust Adjust/Add/Deduct/Assign SMS units
+router.post('/churches/:id/adjust-sms-units', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { mode = 'ADD', units, reason } = req.body;
+
+  const churches = db.get('churches');
+  const church = churches.find(c => c.id === id);
+  if (!church) {
+    res.status(404).json({ error: 'Church not found in database.' });
+    return;
+  }
+
+  const parsedUnits = parseInt(units, 10);
+  if (isNaN(parsedUnits) || parsedUnits < 0) {
+    res.status(400).json({ error: 'Please provide a valid non-negative unit amount.' });
+    return;
+  }
+
+  const prevBalance = church.smsCredits ?? 0;
+  let newBalance = prevBalance;
+  let amountChanged = 0;
+  let action: 'ASSIGN' | 'ADD' | 'DEDUCT' = 'ADD';
+  let updatedAllocated = church.smsAllocatedUnits ?? prevBalance;
+
+  if (mode === 'ASSIGN') {
+    action = 'ASSIGN';
+    newBalance = parsedUnits;
+    amountChanged = newBalance - prevBalance;
+    if (newBalance > updatedAllocated) {
+      updatedAllocated = newBalance;
+    }
+  } else if (mode === 'ADD') {
+    action = 'ADD';
+    newBalance = prevBalance + parsedUnits;
+    amountChanged = parsedUnits;
+    updatedAllocated = updatedAllocated + parsedUnits;
+  } else if (mode === 'DEDUCT') {
+    action = 'DEDUCT';
+    newBalance = Math.max(0, prevBalance - parsedUnits);
+    amountChanged = -(prevBalance - newBalance);
+  } else {
+    res.status(400).json({ error: 'Invalid mode. Must be ASSIGN, ADD, or DEDUCT.' });
+    return;
+  }
+
+  const updatedChurch: Church = {
+    ...church,
+    smsCredits: newBalance,
+    smsAllocatedUnits: updatedAllocated,
+    smsUnitsUsed: church.smsUnitsUsed ?? 0,
+    updatedAt: new Date().toISOString(),
+  };
+
+  db.update('churches', list => list.map(c => (c.id === id ? updatedChurch : c)));
+  await db.saveDoc('churches', id, updatedChurch);
+
+  const unitAuditId = `sua_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const unitAudit: SmsUnitAudit = {
+    id: unitAuditId,
+    churchId: id,
+    churchName: church.name,
+    action,
+    amountChanged,
+    prevUnits: prevBalance,
+    newUnits: newBalance,
+    reason: reason || `Super Admin ${action} of ${parsedUnits} units`,
+    performedBy: req.user?.fullName || req.user?.email || 'Super Admin',
+    timestamp: new Date().toISOString(),
+  };
+  db.update('smsUnitAudits', list => [unitAudit, ...list]);
+  await db.saveDoc('smsUnitAudits', unitAuditId, unitAudit);
+
+  res.json({
+    success: true,
+    message: `Successfully updated SMS units for "${church.name}". New balance: ${newBalance} units.`,
+    church: updatedChurch,
+    audit: unitAudit,
+  });
+});
+
+// POST /api/super-admin/churches/:id/sms-pricing - Update per-unit SMS price for a specific church
+router.post('/churches/:id/sms-pricing', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { pricePerUnit, reason } = req.body;
+
+  const churches = db.get('churches');
+  const church = churches.find(c => c.id === id);
+  if (!church) {
+    res.status(404).json({ error: 'Church not found in database.' });
+    return;
+  }
+
+  const parsedPrice = parseFloat(pricePerUnit);
+  if (isNaN(parsedPrice) || parsedPrice < 0) {
+    res.status(400).json({ error: 'Please provide a valid non-negative price per SMS unit.' });
+    return;
+  }
+
+  const prevPrice = church.smsPricePerUnit ?? 0.05;
+  const updatedChurch: Church = {
+    ...church,
+    smsPricePerUnit: Number(parsedPrice.toFixed(4)),
+    updatedAt: new Date().toISOString(),
+  };
+
+  db.update('churches', list => list.map(c => (c.id === id ? updatedChurch : c)));
+  await db.saveDoc('churches', id, updatedChurch);
+
+  const unitAuditId = `sua_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const unitAudit: SmsUnitAudit = {
+    id: unitAuditId,
+    churchId: id,
+    churchName: church.name,
+    action: 'PRICE_CHANGE',
+    prevUnits: church.smsCredits ?? 0,
+    newUnits: church.smsCredits ?? 0,
+    prevPrice,
+    newPrice: parsedPrice,
+    reason: reason || `Updated SMS unit price to GH₵ ${parsedPrice.toFixed(4)}`,
+    performedBy: req.user?.fullName || req.user?.email || 'Super Admin',
+    timestamp: new Date().toISOString(),
+  };
+  db.update('smsUnitAudits', list => [unitAudit, ...list]);
+  await db.saveDoc('smsUnitAudits', unitAuditId, unitAudit);
+
+  res.json({
+    success: true,
+    message: `SMS price for "${church.name}" updated to GH₵ ${parsedPrice.toFixed(4)} per unit.`,
+    church: updatedChurch,
+    audit: unitAudit,
+  });
+});
+
+// POST /api/super-admin/churches/:id/sms-status - Enable/Disable SMS for a church
+router.post('/churches/:id/sms-status', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { status, reason } = req.body;
+
+  if (!status || !['ACTIVE', 'DISABLED'].includes(status)) {
+    res.status(400).json({ error: 'Status must be ACTIVE or DISABLED.' });
+    return;
+  }
+
+  const churches = db.get('churches');
+  const church = churches.find(c => c.id === id);
+  if (!church) {
+    res.status(404).json({ error: 'Church not found in database.' });
+    return;
+  }
+
+  const updatedChurch: Church = {
+    ...church,
+    smsStatus: status as 'ACTIVE' | 'DISABLED',
+    updatedAt: new Date().toISOString(),
+  };
+
+  db.update('churches', list => list.map(c => (c.id === id ? updatedChurch : c)));
+  await db.saveDoc('churches', id, updatedChurch);
+
+  const unitAuditId = `sua_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const unitAudit: SmsUnitAudit = {
+    id: unitAuditId,
+    churchId: id,
+    churchName: church.name,
+    action: 'STATUS_CHANGE',
+    prevUnits: church.smsCredits ?? 0,
+    newUnits: church.smsCredits ?? 0,
+    reason: reason || `SMS service status set to ${status}`,
+    performedBy: req.user?.fullName || req.user?.email || 'Super Admin',
+    timestamp: new Date().toISOString(),
+  };
+  db.update('smsUnitAudits', list => [unitAudit, ...list]);
+  await db.saveDoc('smsUnitAudits', unitAuditId, unitAudit);
+
+  res.json({
+    success: true,
+    message: `SMS status for "${church.name}" set to ${status}.`,
+    church: updatedChurch,
+    audit: unitAudit,
+  });
+});
+
+// GET /api/super-admin/sms/churches-summary - Overview of all registered churches' SMS pricing, allocations, and usage
+router.get('/sms/churches-summary', (_req: AuthenticatedRequest, res: Response) => {
+  const churches = db.get('churches');
+  const messages = db.get('smsMessages');
+
+  const summary = churches.map(c => {
+    const churchMsgs = messages.filter(m => m.churchId === c.id);
+    const deliveredCount = churchMsgs.filter(m => m.status === 'Delivered').length;
+    const failedCount = churchMsgs.filter(m => m.status === 'Failed' || m.status === 'Unable to Send').length;
+    const lastDispatched = churchMsgs.length > 0 ? (churchMsgs[0].sentAt || churchMsgs[0].createdAt) : undefined;
+    const totalUnitsDeducted = churchMsgs.reduce((acc, m) => acc + (m.unitsDeducted || 0), 0);
+
+    return {
+      id: c.id,
+      name: c.name,
+      city: c.city || '',
+      seniorPastor: c.seniorPastor || '',
+      adminEmail: c.adminEmail || '',
+      adminPhone: c.adminPhone || '',
+      smsPricePerUnit: c.smsPricePerUnit ?? 0.05,
+      smsAllocatedUnits: c.smsAllocatedUnits ?? (c.smsCredits ?? 500),
+      smsUnitsUsed: c.smsUnitsUsed ?? totalUnitsDeducted,
+      smsCredits: c.smsCredits ?? 500,
+      smsStatus: c.smsStatus || 'ACTIVE',
+      totalMessagesSent: churchMsgs.length,
+      deliveredCount,
+      failedCount,
+      lastDispatchedAt: lastDispatched,
+    };
+  });
+
+  res.json({ churches: summary });
+});
+
+// GET /api/super-admin/churches/:id/sms-history - Dedicated church SMS usage & audit history
+router.get('/churches/:id/sms-history', (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const churches = db.get('churches');
+  const church = churches.find(c => c.id === id);
+  if (!church) {
+    res.status(404).json({ error: 'Church not found in database.' });
+    return;
+  }
+
+  const messages = db.get('smsMessages').filter(m => m.churchId === id);
+  const unitAudits = db.get('smsUnitAudits').filter(a => a.churchId === id);
+
+  res.json({
+    church: {
+      id: church.id,
+      name: church.name,
+      smsPricePerUnit: church.smsPricePerUnit ?? 0.05,
+      smsAllocatedUnits: church.smsAllocatedUnits ?? (church.smsCredits ?? 500),
+      smsUnitsUsed: church.smsUnitsUsed ?? 0,
+      smsCredits: church.smsCredits ?? 500,
+      smsStatus: church.smsStatus || 'ACTIVE',
+    },
+    messages,
+    unitAudits,
+  });
+});
+
+// GET /api/super-admin/sms/unit-audits - All SMS unit adjustment audit trail logs
+router.get('/sms/unit-audits', (_req: AuthenticatedRequest, res: Response) => {
+  const audits = db.get('smsUnitAudits');
+  res.json({ audits });
 });
 
 // DELETE /api/super-admin/churches/:id - Hard delete from Firebase with permanent purge
@@ -447,7 +718,7 @@ router.post('/sms/test', async (req: AuthenticatedRequest, res: Response) => {
   if (!recipientPhone || !recipientPhone.trim()) {
     res.status(400).json({
       success: false,
-      error: 'Please provide a valid recipient phone number (e.g. 0241234567 or +233241234567).',
+      error: 'Please provide a valid recipient phone number (e.g. 0201234567, 0241234567, 0271234567, or +233XXXXXXXXX).',
       details: 'Recipient phone number is required.',
     });
     return;
@@ -459,7 +730,7 @@ router.post('/sms/test', async (req: AuthenticatedRequest, res: Response) => {
     if (result.success) {
       res.json({
         success: true,
-        message: 'SMS test sent successfully.',
+        message: result.message || 'SMS test submitted successfully.',
         details: result.details,
       });
     } else {
@@ -482,6 +753,36 @@ router.post('/sms/test', async (req: AuthenticatedRequest, res: Response) => {
 router.get('/sms/logs', (_req: AuthenticatedRequest, res: Response) => {
   const messages = db.get('smsMessages');
   res.json(messages.slice(0, 150));
+});
+
+// Check single message live carrier status with Arkesel Gateway
+router.all('/sms/:id/status', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await SmsService.checkSingleMessageStatus(req.params.id);
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Status check failed' });
+  }
+});
+
+// POST /api/super-admin/sms/reconcile - Check delivery reports for pending messages with Arkesel
+router.post('/sms/reconcile', async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await SmsService.reconcilePendingMessages();
+    res.json({
+      success: true,
+      message: `Checked ${result.checked} pending message(s), updated ${result.updated} status(es) from Arkesel gateway reports.`,
+      checked: result.checked,
+      updated: result.updated,
+      messages: result.messages,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Failed to reconcile pending messages.' });
+  }
 });
 
 // GET /api/super-admin/audit-logs
@@ -982,14 +1283,21 @@ router.get('/sms/stats', (_req: AuthenticatedRequest, res: Response) => {
   const deliveryRate = total > 0 ? ((delivered / total) * 100).toFixed(1) : '100.0';
   const acceptanceRate = total > 0 ? (((delivered + accepted) / total) * 100).toFixed(1) : '100.0';
 
-  // Telecom Carrier breakdown (estimated by Ghana network prefixes)
+  // Telecom Carrier breakdown supporting all Ghanaian networks
   const carrierStats = {
-    mtn: messages.filter(m => /^(233)?(0)?(24|54|55|59)/.test(m.normalizedPhone || m.phone)).length,
-    telecel: messages.filter(m => /^(233)?(0)?(20|50)/.test(m.normalizedPhone || m.phone)).length,
-    at: messages.filter(m => /^(233)?(0)?(26|27|56|57)/.test(m.normalizedPhone || m.phone)).length,
+    mtn: 0,
+    telecel: 0,
+    at: 0,
     other: 0,
   };
-  carrierStats.other = Math.max(0, total - (carrierStats.mtn + carrierStats.telecel + carrierStats.at));
+  for (const m of messages) {
+    const p = m.normalizedPhone || m.phone || '';
+    const res = getGhanaianNetwork(p);
+    if (res.network === 'MTN') carrierStats.mtn++;
+    else if (res.network === 'Telecel') carrierStats.telecel++;
+    else if (res.network === 'AT') carrierStats.at++;
+    else carrierStats.other++;
+  }
 
   res.json({
     totalDispatched: total,

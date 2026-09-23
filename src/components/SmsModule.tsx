@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { DepartmentOrGroup, Church, Member, SmsMessage } from '../types';
+import { normalizePhoneNumber, detectGhanaNetwork } from '../utils/phoneUtils';
+import { useMembers } from '../context/MembersContext';
 
 interface Props {
   church?: Church | null;
@@ -40,28 +42,17 @@ function validatePhoneNumber(phone: string | undefined | null): {
   formatted: string;
   reason?: string;
 } {
-  if (!phone || !phone.trim()) {
-    return { isValid: false, formatted: '', reason: 'No phone number provided' };
-  }
-  const cleaned = phone.replace(/[\s\-\(\)\.]/g, '').trim();
-  if (cleaned.startsWith('0') && /^\d{10}$/.test(cleaned)) {
-    return { isValid: true, formatted: `+233${cleaned.slice(1)}` };
-  }
-  if (cleaned.startsWith('+233') && /^\+233\d{9}$/.test(cleaned)) {
-    return { isValid: true, formatted: cleaned };
-  }
-  if (cleaned.startsWith('233') && /^233\d{9}$/.test(cleaned)) {
-    return { isValid: true, formatted: `+${cleaned}` };
-  }
-  if (cleaned.startsWith('+') && cleaned.length >= 10 && cleaned.length <= 16 && /^\+\d+$/.test(cleaned)) {
-    return { isValid: true, formatted: cleaned };
-  }
-  return { isValid: false, formatted: cleaned, reason: 'Invalid mobile number format' };
+  const norm = normalizePhoneNumber(phone);
+  return {
+    isValid: norm.isValid,
+    formatted: norm.normalized,
+    reason: norm.error,
+  };
 }
 
 export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
+  const { members, smsTarget } = useMembers();
   const [departments, setDepartments] = useState<DepartmentOrGroup[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
   const [smsLogs, setSmsLogs] = useState<SmsMessage[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -79,14 +70,27 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
 
   // Message body
   const [messageText, setMessageText] = useState(
-    "Beloved [Member Name], grace and peace to you from [Church Name]. Reminder for this week's service at 8:30am. Come expectant!"
+    "Beloved [Member Name], grace and peace to you. Reminder for this week's service at 8:30am. Come expectant!"
   );
+
+  // React to cross-module smsTarget navigation
+  useEffect(() => {
+    if (smsTarget?.member) {
+      setTargetType('SELECTED_MEMBERS');
+      setSelectedMemberIds([smsTarget.member.id]);
+      const msg = smsTarget.suggestedMessage || smsTarget.initialMessage;
+      if (msg) {
+        setMessageText(msg);
+      }
+    }
+  }, [smsTarget]);
 
   // Dispatch state & confirmation
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<any | null>(null);
   const [dispatchingReminders, setDispatchingReminders] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,13 +103,11 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [dRes, mRes, lRes] = await Promise.all([
+      const [dRes, lRes] = await Promise.all([
         ApiClient.get('/api/church/departments').catch(() => []),
-        ApiClient.get('/api/church/members').catch(() => []),
         ApiClient.get('/api/church/communication/sms-logs').catch(() => []),
       ]);
       setDepartments(Array.isArray(dRes) ? dRes : []);
-      setMembers(Array.isArray(mRes) ? mRes : []);
       setSmsLogs(Array.isArray(lRes) ? lRes : []);
       if (Array.isArray(dRes) && dRes.length > 0 && !selectedDepartmentId) {
         setSelectedDepartmentId(dRes[0].id);
@@ -220,9 +222,16 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
 
       if (targetType === 'SELECTED_MEMBERS') {
         payload.memberIds = selectedMemberIds;
+        payload.selectedMemberIds = selectedMemberIds;
+        payload.recipients = selectedMembersList.map(m => ({
+          memberId: m.id,
+          name: m.fullName,
+          phone: m.phone || (m as any).normalizedPhone || '',
+        }));
       } else if (targetType === 'DEPARTMENT') {
         payload.departmentId = selectedDepartmentId;
       } else if (targetType === 'CUSTOM') {
+        payload.recipientType = 'CUSTOM';
         payload.customNumbers = customPhones;
       }
 
@@ -257,6 +266,21 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
     }
   };
 
+  // Reconcile pending delivery statuses with Arkesel Gateway
+  const handleReconcileDeliveryStatuses = async () => {
+    try {
+      setReconciling(true);
+      setError(null);
+      const res = await ApiClient.post('/api/church/sms/reconcile');
+      setNotice(res.message || `Delivery check complete: checked ${res.checked} pending message(s), updated ${res.updated} status(es).`);
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'Failed to check delivery status with gateway.');
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   // Filtered SMS History Logs
   const filteredSmsLogs = useMemo(() => {
     return smsLogs.filter(log => {
@@ -266,17 +290,24 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
         !q ||
         (log.recipientName && log.recipientName.toLowerCase().includes(q)) ||
         (log.phone && log.phone.includes(q)) ||
+        (log.normalizedPhone && log.normalizedPhone.includes(q)) ||
         (log.message && log.message.toLowerCase().includes(q)) ||
+        (log.arkeselMessageId && log.arkeselMessageId.toLowerCase().includes(q)) ||
+        (log.providerMessageId && log.providerMessageId.toLowerCase().includes(q)) ||
         (log.relatedReceiptNumber && log.relatedReceiptNumber.toLowerCase().includes(q));
 
       // Status filter
       let matchesStatus = true;
-      if (historyStatusFilter === 'DELIVERED') {
+      if (historyStatusFilter === 'SUBMITTED') {
+        matchesStatus = log.status === 'Submitted' || log.status === 'Pending';
+      } else if (historyStatusFilter === 'DELIVERED') {
         matchesStatus = log.status === 'Delivered' || log.status === 'Accepted';
+      } else if (historyStatusFilter === 'FAILED') {
+        matchesStatus = log.status === 'Failed' || log.status === 'Rejected';
+      } else if (historyStatusFilter === 'UNDELIVERED') {
+        matchesStatus = log.status === 'Undelivered' || log.status === 'Expired';
       } else if (historyStatusFilter === 'UNABLE_TO_SEND') {
         matchesStatus = log.status === 'Unable to Send';
-      } else if (historyStatusFilter === 'FAILED') {
-        matchesStatus = log.status === 'Failed';
       }
 
       // Date filter
@@ -781,11 +812,11 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
                 rows={2}
                 value={customPhones}
                 onChange={e => setCustomPhones(e.target.value)}
-                placeholder="0241234567, 0501234567, +233201234567"
+                placeholder="0201234567, 0241234567, 0261234567, 0501234567, +233241234567"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg font-mono focus:outline-none focus:border-teal-700"
               />
               <p className="text-[10px] text-slate-400 mt-1">
-                Supports standard Ghana mobile networks (MTN, Vodafone/Telecel, AirtelTigo) and international numbers.
+                Supports all Ghana mobile networks (Telecel, MTN, AT/AirtelTigo) and international numbers (e.g. 0XXXXXXXXX, +233XXXXXXXXX, 233XXXXXXXXX).
               </p>
             </div>
           )}
@@ -883,19 +914,35 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
         {/* Dispatch Result Summary Banner */}
         {sendResult && (
           <div className="p-4 bg-teal-50 border-t border-teal-200 text-xs text-teal-950 flex items-start justify-between">
-            <div className="space-y-1">
-              <strong className="font-bold flex items-center space-x-1.5">
-                <CheckCircle className="w-4 h-4 text-teal-700" />
+            <div className="space-y-1.5">
+              <strong className="font-bold flex items-center space-x-1.5 text-teal-900">
+                <CheckCircle className="w-4 h-4 text-teal-700 shrink-0" />
                 <span>{sendResult.message}</span>
               </strong>
-              <div className="text-slate-600 space-x-2">
-                <span>Targeted: {sendResult.totalTargeted}</span> •{' '}
-                <span className="text-emerald-700 font-semibold">Delivered: {sendResult.sent}</span> •{' '}
-                <span className="text-rose-700 font-semibold">Failed/Invalid: {sendResult.failed}</span>
+              <div className="text-slate-600 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <span>Targeted: <strong className="text-slate-800">{sendResult.totalTargeted}</strong></span>
+                <span>•</span>
+                <span className="text-sky-800 font-medium">
+                  Submitted / In Transit: <strong>{sendResult.submitted ?? sendResult.pending ?? 0}</strong>
+                </span>
+                <span>•</span>
+                <span className="text-emerald-700 font-medium">
+                  Confirmed Delivered: <strong>{sendResult.delivered ?? 0}</strong>
+                </span>
+                <span>•</span>
+                <span className="text-rose-700 font-medium">
+                  Failed/Invalid: <strong>{sendResult.failed}</strong>
+                </span>
                 {sendResult.skippedNoPhone > 0 && (
-                  <span> ({sendResult.skippedNoPhone} without valid phone)</span>
+                  <span className="text-slate-500"> ({sendResult.skippedNoPhone} without valid phone)</span>
                 )}
               </div>
+              <p className="text-[11px] text-slate-500 pt-0.5 flex items-center space-x-1">
+                <Info className="w-3.5 h-3.5 inline-block text-teal-600 shrink-0" />
+                <span>
+                  Carrier delivery receipts (DLR) from MTN, Telecel, and AT will update statuses from <strong>Submitted</strong> to <strong>Delivered</strong> upon handset receipt.
+                </span>
+              </p>
             </div>
             <button
               onClick={() => setSendResult(null)}
@@ -1044,13 +1091,24 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
             </p>
           </div>
 
-          <button
-            onClick={loadData}
-            className="px-3 py-1.5 border border-slate-200 text-slate-600 hover:text-teal-800 rounded-lg text-xs font-medium flex items-center space-x-1.5 transition-colors self-start sm:self-auto"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Refresh History</span>
-          </button>
+          <div className="flex items-center space-x-2 self-start sm:self-auto">
+            <button
+              onClick={handleReconcileDeliveryStatuses}
+              disabled={reconciling}
+              className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+              title="Poll Arkesel Gateway for latest cellular network delivery reports"
+            >
+              <Radio className={`w-3.5 h-3.5 text-teal-700 ${reconciling ? 'animate-pulse' : ''}`} />
+              <span>{reconciling ? 'Checking DLR...' : 'Check Live Delivery'}</span>
+            </button>
+            <button
+              onClick={loadData}
+              className="px-3 py-1.5 border border-slate-200 text-slate-600 hover:text-teal-800 rounded-lg text-xs font-medium flex items-center space-x-1.5 transition-colors cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-teal-700' : ''}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
 
         {/* History Search & Filters Toolbar */}
@@ -1084,9 +1142,11 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-teal-700"
             >
               <option value="ALL">All Delivery Statuses</option>
-              <option value="DELIVERED">Delivered / Accepted</option>
+              <option value="SUBMITTED">Submitted / In Transit (Pending DLR)</option>
+              <option value="DELIVERED">Delivered (Confirmed)</option>
+              <option value="FAILED">Failed / Rejected</option>
+              <option value="UNDELIVERED">Undelivered / Expired</option>
               <option value="UNABLE_TO_SEND">Unable to Send (No Phone)</option>
-              <option value="FAILED">Failed</option>
             </select>
           </div>
 
@@ -1149,8 +1209,14 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredSmsLogs.map(log => {
-                  const isDelivered = log.status === 'Delivered' || log.status === 'Accepted';
+                  const isDelivered = log.status === 'Delivered';
+                  const isSubmitted = log.status === 'Submitted' || log.status === 'Pending';
+                  const isUndelivered = log.status === 'Undelivered' || log.status === 'Expired';
                   const isUnableToSend = log.status === 'Unable to Send';
+                  const isFailed = log.status === 'Failed' || log.status === 'Rejected';
+
+                  const detectedNetwork = log.recipientNetwork || detectGhanaNetwork(log.normalizedPhone || log.phone || '');
+
                   return (
                     <tr
                       key={log.id}
@@ -1160,8 +1226,17 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
                       <td className="py-2.5 px-4 font-semibold text-slate-800">
                         {log.recipientName || 'Member'}
                       </td>
-                      <td className="py-2.5 px-4 font-mono text-slate-600 text-[11px]">
-                        {log.normalizedPhone || log.phone || <span className="text-slate-400 italic">None</span>}
+                      <td className="py-2.5 px-4">
+                        <div className="flex items-center space-x-1.5">
+                          <span className="font-mono text-slate-600 text-[11px]">
+                            {log.normalizedPhone || log.phone || <span className="text-slate-400 italic">None</span>}
+                          </span>
+                          {detectedNetwork !== 'Unknown' && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                              {detectedNetwork}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2.5 px-4">
                         <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">
@@ -1182,22 +1257,36 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
                         {log.message}
                       </td>
                       <td className="py-2.5 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center space-x-1 ${
-                            isDelivered
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : isUnableToSend
-                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                              : 'bg-rose-50 text-rose-700 border border-rose-200'
-                          }`}
-                        >
-                          {isDelivered && <CheckCircle className="w-3 h-3 text-emerald-600" />}
-                          {isUnableToSend && <AlertTriangle className="w-3 h-3 text-amber-600" />}
-                          <span>{log.status}</span>
-                        </span>
+                        <div>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold inline-flex items-center space-x-1 ${
+                              isDelivered
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : isSubmitted
+                                ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                                : isUndelivered
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                : isUnableToSend
+                                ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                                : 'bg-rose-50 text-rose-700 border border-rose-200'
+                            }`}
+                          >
+                            {isDelivered && <CheckCircle className="w-3 h-3 text-emerald-600" />}
+                            {isSubmitted && <Clock className="w-3 h-3 text-sky-600" />}
+                            {isUndelivered && <AlertTriangle className="w-3 h-3 text-amber-600" />}
+                            {isUnableToSend && <AlertTriangle className="w-3 h-3 text-slate-500" />}
+                            {isFailed && <AlertCircle className="w-3 h-3 text-rose-600" />}
+                            <span>{log.status === 'Submitted' ? 'Submitted (In Transit)' : log.status}</span>
+                          </span>
+                          {log.failureReason && (isFailed || isUndelivered) && (
+                            <p className="text-[10px] text-rose-600 font-medium truncate max-w-[140px] mt-0.5" title={log.failureReason}>
+                              {log.failureReason}
+                            </p>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2.5 px-4 text-slate-400 text-[11px] whitespace-nowrap">
-                        {new Date(log.sentAt || log.createdAt).toLocaleDateString([], {
+                        {new Date(log.submittedAt || log.sentAt || log.createdAt).toLocaleDateString([], {
                           month: 'short',
                           day: 'numeric',
                           hour: '2-digit',
@@ -1243,13 +1332,31 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
                   </span>
                 </div>
                 <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Carrier Network</span>
+                  <span className="font-semibold text-slate-700">
+                    {selectedLogDetail.recipientNetwork || detectGhanaNetwork(selectedLogDetail.normalizedPhone || selectedLogDetail.phone || '')}
+                  </span>
+                </div>
+                <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Sender Name</span>
                   <span className="font-mono text-slate-700">{selectedLogDetail.senderName}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Status</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Delivery Status</span>
                   <span className="font-bold text-slate-800">{selectedLogDetail.status}</span>
                 </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Carrier DLR Time</span>
+                  <span className="text-slate-700">
+                    {selectedLogDetail.deliveredAt ? new Date(selectedLogDetail.deliveredAt).toLocaleString() : (selectedLogDetail.status === 'Submitted' ? 'Awaiting Carrier Receipt' : '—')}
+                  </span>
+                </div>
+                {selectedLogDetail.arkeselMessageId && (
+                  <div className="col-span-2">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Gateway Provider Ref</span>
+                    <span className="font-mono text-[11px] text-slate-600">{selectedLogDetail.arkeselMessageId}</span>
+                  </div>
+                )}
                 {selectedLogDetail.relatedReceiptNumber && (
                   <div className="col-span-2">
                     <span className="text-[10px] uppercase font-bold text-slate-400 block">
@@ -1261,8 +1368,24 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
                   </div>
                 )}
                 {selectedLogDetail.failureReason && (
-                  <div className="col-span-2 p-2 bg-amber-50 rounded border border-amber-200 text-amber-900 text-[11px]">
-                    <strong>Diagnostic Reason:</strong> {selectedLogDetail.failureReason}
+                  <div className="col-span-2 p-2.5 bg-rose-50 rounded-lg border border-rose-200 text-rose-900 text-[11px] space-y-1">
+                    <div className="font-bold flex items-center space-x-1.5 text-rose-800">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Gateway Diagnostic Reason:</span>
+                    </div>
+                    <div className="font-medium">{selectedLogDetail.failureReason}</div>
+                  </div>
+                )}
+                {selectedLogDetail.gatewayResponse && (
+                  <div className="col-span-2">
+                    <details className="text-[11px] text-slate-500">
+                      <summary className="cursor-pointer font-semibold text-slate-600 hover:text-slate-800">
+                        View Raw Gateway Response
+                      </summary>
+                      <pre className="mt-1.5 p-2 bg-slate-900 text-slate-200 rounded font-mono text-[10px] overflow-x-auto max-h-32 whitespace-pre-wrap">
+                        {selectedLogDetail.gatewayResponse}
+                      </pre>
+                    </details>
                   </div>
                 )}
               </div>

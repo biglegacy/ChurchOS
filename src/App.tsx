@@ -19,6 +19,7 @@ import { SmsModule } from './components/SmsModule';
 import { ChurchSettingsModule } from './components/ChurchSettingsModule';
 import { MemberPortalView } from './components/MemberPortalView';
 import { ChurchStaffModule } from './components/ChurchStaffModule';
+import { MembersProvider } from './context/MembersContext';
 import { hasPermission } from './types';
 
 export default function App() {
@@ -155,64 +156,66 @@ export default function App() {
 
           {/* CHURCH TENANT SYSTEM (ADMIN / PASTORS / OFFICERS) */}
           {!isSuperAdmin && !isMember && (
-            <div>
-              {activeTab === 'dashboard' && (
-                <ChurchDashboard
-                  church={church}
-                  onNavigateTab={tab => setActiveTab(tab)}
-                  onQuickAction={handleQuickAction}
-                />
-              )}
+            <MembersProvider churchId={church?.id}>
+              <div>
+                {activeTab === 'dashboard' && (
+                  <ChurchDashboard
+                    church={church}
+                    onNavigateTab={tab => setActiveTab(tab)}
+                    onQuickAction={handleQuickAction}
+                  />
+                )}
 
-              {activeTab === 'members' && (
-                <MembersModule
-                  church={church}
-                  onRecordGivingForMember={() => setActiveTab('giving')}
-                />
-              )}
+                {activeTab === 'members' && (
+                  <MembersModule
+                    church={church}
+                    onRecordGivingForMember={() => setActiveTab('giving')}
+                  />
+                )}
 
-              {activeTab === 'attendance' && (
-                <AttendanceModule />
-              )}
+                {activeTab === 'attendance' && (
+                  <AttendanceModule />
+                )}
 
-              {activeTab === 'giving' && (
-                <GivingModule church={church} />
-              )}
+                {activeTab === 'giving' && (
+                  <GivingModule church={church} />
+                )}
 
-              {activeTab === 'visitors' && (
-                <VisitorsModule />
-              )}
+                {activeTab === 'visitors' && (
+                  <VisitorsModule />
+                )}
 
-              {activeTab === 'pastoral' && (
-                <PastoralModule />
-              )}
+                {activeTab === 'pastoral' && (
+                  <PastoralModule />
+                )}
 
-              {activeTab === 'departments' && (
-                <DepartmentsModule />
-              )}
+                {activeTab === 'departments' && (
+                  <DepartmentsModule />
+                )}
 
-              {activeTab === 'events' && (
-                <EventsModule />
-              )}
+                {activeTab === 'events' && (
+                  <EventsModule onNavigateTab={tab => setActiveTab(tab)} />
+                )}
 
-              {activeTab === 'sms' && (
-                <SmsModule
-                  church={church}
-                  onNavigateTab={tab => setActiveTab(tab)}
-                />
-              )}
+                {activeTab === 'sms' && (
+                  <SmsModule
+                    church={church}
+                    onNavigateTab={tab => setActiveTab(tab)}
+                  />
+                )}
 
-              {activeTab === 'staff' && (
-                <ChurchStaffModule church={church} />
-              )}
+                {activeTab === 'staff' && (
+                  <ChurchStaffModule church={church} />
+                )}
 
-              {activeTab === 'settings' && (
-                <ChurchSettingsModule
-                  church={church}
-                  onUpdateChurch={updated => setChurch(updated)}
-                />
-              )}
-            </div>
+                {activeTab === 'settings' && (
+                  <ChurchSettingsModule
+                    church={church}
+                    onUpdateChurch={updated => setChurch(updated)}
+                  />
+                )}
+              </div>
+            </MembersProvider>
           )}
         </main>
 

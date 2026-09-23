@@ -65,17 +65,17 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
     // Automated Templates
     contributionSmsTemplate:
       church?.settings?.contributionSmsTemplate ||
-      'Dear [Member Name], thank you for your [Contribution Type] of GH₵[Amount] to [Church Name]. Ref: [Receipt Number]. God bless you!',
+      'Dear [Member Name], thank you for your [Contribution Type] of GH₵[Amount]. Ref: [Receipt Number]. God bless you abundantly!',
     absenceSmsEnabled: church?.settings?.absenceSmsEnabled ?? true,
     absenceSmsDelayMinutes: church?.settings?.absenceSmsDelayMinutes || 45,
     absenceSmsTemplate:
       church?.settings?.absenceSmsTemplate ||
-      'Beloved [Member Name], we missed your fellowship at [Church Name] today during [Service Name]. May the Lord bless and keep you this week.',
+      'Beloved [Member Name], we missed your fellowship today during [Service Name]. May the Lord bless and keep you this week.',
     titheReminderEnabled: church?.settings?.titheReminderEnabled ?? true,
     titheReminderFrequency: church?.settings?.titheReminderFrequency || 'Monthly',
     titheReminderTemplate:
       church?.settings?.titheReminderTemplate ||
-      'Greetings [Member Name] from [Church Name]. Honor the Lord with your tithes and offerings (Malachi 3:10). God bless you abundantly.',
+      'Greetings [Member Name]. Honor the Lord with your tithes and offerings (Malachi 3:10). God bless you abundantly.',
   });
 
   const [customTypeInput, setCustomTypeInput] = useState('');
@@ -183,6 +183,10 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
           manualSmsEnabled: formData.manualSmsEnabled,
           autoContributionSms: formData.autoContributionSms,
           autoContributionSmsTypes: formData.autoContributionSmsTypes,
+          customGivingTypes: church?.settings?.customGivingTypes || [],
+          customExpenseCategories: church?.settings?.customExpenseCategories || [],
+          customDepartmentCategories: church?.settings?.customDepartmentCategories || [],
+          customPastoralCategories: church?.settings?.customPastoralCategories || [],
           contributionSmsTemplate: formData.contributionSmsTemplate,
           absenceSmsEnabled: formData.absenceSmsEnabled,
           absenceSmsDelayMinutes: Number(formData.absenceSmsDelayMinutes),
@@ -207,7 +211,7 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
   // Test live SMS connection with configured gateway and sender ID
   const handleTestConnection = async () => {
     if (!testPhone.trim()) {
-      setError('Please provide a valid test phone number (e.g. 024XXXXXXX or +233XXXXXXXXX).');
+      setError('Please provide a valid test phone number (e.g. 0201234567, 0241234567, 0271234567 or +233XXXXXXXXX).');
       return;
     }
 
@@ -476,7 +480,7 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
                 type="text"
                 value={testPhone}
                 onChange={e => setTestPhone(e.target.value)}
-                placeholder="Test phone (e.g. 0244123456 or +233244123456)"
+                placeholder="Test phone (e.g. 0201234567, 0241234567, +233201234567)"
                 className="flex-1 px-3 py-1.5 bg-white border border-teal-200 rounded-md font-mono text-xs focus:outline-none focus:border-teal-700"
               />
               <button
