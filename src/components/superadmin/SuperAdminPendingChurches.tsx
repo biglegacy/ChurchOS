@@ -28,13 +28,16 @@ export const SuperAdminPendingChurches: React.FC<Props> = ({
   onRefresh,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const pending = churches.filter(c => c.status === 'PENDING');
-  const filtered = pending.filter(c =>
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.adminEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.seniorPastor.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const pending = (churches || []).filter(c => c.status === 'PENDING');
+  const filtered = (pending || []).filter(c => {
+    const q = (searchTerm || '').toLowerCase();
+    return (
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.city || '').toLowerCase().includes(q) ||
+      (c.adminEmail || '').toLowerCase().includes(q) ||
+      (c.seniorPastor || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="space-y-5 text-left">
@@ -80,7 +83,7 @@ export const SuperAdminPendingChurches: React.FC<Props> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filtered.map(c => (
+          {(filtered || []).map(c => (
             <div
               key={c.id}
               className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between space-y-4 hover:border-amber-300 transition"

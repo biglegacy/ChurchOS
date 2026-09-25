@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent, SmsMessage, User, hashPassword, getDefaultRolePermissions } from '../db';
+import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent, SmsMessage, User, hashPassword, getDefaultRolePermissions, GivingCategory, GIVING_CATEGORIES, resolveReliableGivingCategory } from '../db';
 import { requireAuth, enforceTenant, AuthenticatedRequest } from '../auth';
 import { SmsService, normalizePhoneNumber } from '../smsService';
 
@@ -169,10 +169,15 @@ router.get('/dashboard', (req: AuthenticatedRequest, res: Response) => {
   const monthlyAttendanceRecords = attendance.filter(a => a.serviceDate.startsWith(currentMonthStr));
   const monthlyAttendancePresent = monthlyAttendanceRecords.filter(a => a.status === 'Present').length;
 
-  // Financial Breakdown
-  const totalTithes = giving.filter(g => g.givingType === 'Tithe').reduce((sum, g) => sum + g.amount, 0);
-  const totalOfferings = giving.filter(g => g.givingType === 'Offering').reduce((sum, g) => sum + g.amount, 0);
-  const totalDonations = giving.filter(g => g.givingType === 'Donation' || g.givingType === 'Special Offering').reduce((sum, g) => sum + g.amount, 0);
+  // Financial Breakdown - Strictly Category-Specific (Requirement 1, 2)
+  const totalTithes = giving.filter(g => (g.givingCategory || g.category) === 'Tithes').reduce((sum, g) => sum + g.amount, 0);
+  const totalOfferings = giving.filter(g => (g.givingCategory || g.category) === 'Offerings').reduce((sum, g) => sum + g.amount, 0);
+  const totalDonations = giving.filter(g => (g.givingCategory || g.category) === 'Donations').reduce((sum, g) => sum + g.amount, 0);
+  const totalSpecialGiving = giving.filter(g => (g.givingCategory || g.category) === 'Special Giving').reduce((sum, g) => sum + g.amount, 0);
+  const totalBuildingFund = giving.filter(g => (g.givingCategory || g.category) === 'Building Fund').reduce((sum, g) => sum + g.amount, 0);
+  const totalMissions = giving.filter(g => (g.givingCategory || g.category) === 'Missions').reduce((sum, g) => sum + g.amount, 0);
+  const totalWelfare = giving.filter(g => (g.givingCategory || g.category) === 'Welfare').reduce((sum, g) => sum + g.amount, 0);
+  const totalOtherGiving = giving.filter(g => (g.givingCategory || g.category) === 'Other Giving').reduce((sum, g) => sum + g.amount, 0);
   const totalGiving = giving.reduce((sum, g) => sum + g.amount, 0);
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
   const netSurplus = totalGiving - totalExpenses;
@@ -213,6 +218,11 @@ router.get('/dashboard', (req: AuthenticatedRequest, res: Response) => {
       totalTithes,
       totalOfferings,
       totalDonations,
+      totalSpecialGiving,
+      totalBuildingFund,
+      totalMissions,
+      totalWelfare,
+      totalOtherGiving,
       totalGiving,
       totalExpenses,
       netSurplus,
@@ -940,6 +950,7 @@ router.post('/giving-types', async (req: AuthenticatedRequest, res: Response) =>
 
   res.status(201).json({
     message: `Custom giving type "${trimmed}" created successfully.`,
+    standardTypes: STANDARD_GIVING_TYPES,
     customTypes: updatedCustom,
     allTypes: Array.from(new Set([...STANDARD_GIVING_TYPES, ...updatedCustom])),
   });
@@ -970,6 +981,7 @@ router.delete('/giving-types/:name', async (req: AuthenticatedRequest, res: Resp
 
   res.json({
     message: `Custom giving type "${nameToDelete}" removed.`,
+    standardTypes: STANDARD_GIVING_TYPES,
     customTypes: updatedCustom,
     allTypes: Array.from(new Set([...STANDARD_GIVING_TYPES, ...updatedCustom])),
   });
@@ -977,16 +989,102 @@ router.delete('/giving-types/:name', async (req: AuthenticatedRequest, res: Resp
 
 router.get('/giving', (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
-  const giving = db.get('giving').filter(g => g.churchId === churchId);
+  const { category, givingCategory, search, startDate, endDate, paymentMethod } = req.query;
+  const targetCategory = ((category as string) || (givingCategory as string) || '').trim();
+
+  let giving = db.get('giving').filter(g => g.churchId === churchId);
+
+  // If a category tab is selected, strictly filter by that category at the query level
+  if (targetCategory && targetCategory !== 'ALL') {
+    giving = giving.filter(g => {
+      const gCat = g.givingCategory || g.category || resolveReliableGivingCategory(g);
+      return gCat === targetCategory;
+    });
+  }
+
+  // Filters operate strictly within the category query
+  if (search && typeof search === 'string' && search.trim()) {
+    const s = search.trim().toLowerCase();
+    giving = giving.filter(g =>
+      (g.memberName && g.memberName.toLowerCase().includes(s)) ||
+      (g.phone && g.phone.toLowerCase().includes(s)) ||
+      (g.receiptNumber && g.receiptNumber.toLowerCase().includes(s)) ||
+      (g.referenceNumber && g.referenceNumber.toLowerCase().includes(s)) ||
+      (g.givingType && g.givingType.toLowerCase().includes(s)) ||
+      (g.notes && g.notes.toLowerCase().includes(s))
+    );
+  }
+
+  if (startDate && typeof startDate === 'string' && startDate.trim()) {
+    giving = giving.filter(g => g.date >= startDate.trim());
+  }
+  if (endDate && typeof endDate === 'string' && endDate.trim()) {
+    giving = giving.filter(g => g.date <= endDate.trim());
+  }
+  if (paymentMethod && typeof paymentMethod === 'string' && paymentMethod.trim() && paymentMethod !== 'ALL') {
+    giving = giving.filter(g => g.paymentMethod === paymentMethod.trim());
+  }
+
+  // Always return sorted latest first
+  giving.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+
   res.json(giving);
+});
+
+// Category-Specific Summary & Totals Endpoint
+router.get('/giving/summary', (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const allGiving = db.get('giving').filter(g => g.churchId === churchId);
+
+  const categories: GivingCategory[] = [
+    'Tithes',
+    'Offerings',
+    'Donations',
+    'Special Giving',
+    'Building Fund',
+    'Missions',
+    'Welfare',
+    'Other Giving',
+  ];
+
+  const breakdown: Record<string, { total: number; count: number }> = {};
+  for (const cat of categories) {
+    const records = allGiving.filter(g => (g.givingCategory || g.category || resolveReliableGivingCategory(g)) === cat);
+    breakdown[cat] = {
+      total: records.reduce((sum, r) => sum + (r.amount || 0), 0),
+      count: records.length,
+    };
+  }
+
+  // Also include any custom or dynamic categories recorded in allGiving
+  for (const g of allGiving) {
+    const cat = (g.givingCategory || g.category || resolveReliableGivingCategory(g) || 'Other Giving').trim();
+    if (cat && !breakdown[cat]) {
+      const records = allGiving.filter(r => (r.givingCategory || r.category || resolveReliableGivingCategory(r) || 'Other Giving').trim() === cat);
+      breakdown[cat] = {
+        total: records.reduce((sum, r) => sum + (r.amount || 0), 0),
+        count: records.length,
+      };
+    }
+  }
+
+  const grandTotal = allGiving.reduce((sum, r) => sum + (r.amount || 0), 0);
+  const recordedCategories = Object.keys(breakdown).filter(cat => breakdown[cat].count > 0);
+
+  res.json({
+    categories: breakdown,
+    recordedCategories,
+    grandTotal,
+    totalRecords: allGiving.length,
+  });
 });
 
 router.post('/giving', async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const data = req.body;
 
-  if (!data.amount || !data.givingType) {
-    res.status(400).json({ error: 'Amount and giving type are required.' });
+  if (!data.amount) {
+    res.status(400).json({ error: 'Amount is required.' });
     return;
   }
 
@@ -996,8 +1094,20 @@ router.post('/giving', async (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
+  // Determine giving category strictly - never infer from description, amount, member name, or date
+  let selectedCategory: GivingCategory;
+  if (data.givingCategory && GIVING_CATEGORIES.includes(data.givingCategory)) {
+    selectedCategory = data.givingCategory;
+  } else if (data.category && GIVING_CATEGORIES.includes(data.category)) {
+    selectedCategory = data.category;
+  } else if (data.givingType) {
+    selectedCategory = resolveReliableGivingCategory({ givingType: data.givingType });
+  } else {
+    selectedCategory = 'Tithes';
+  }
+
   const church = db.get('churches').find(c => c.id === churchId);
-  const normalizedGivingType = (data.givingType || '').trim();
+  const normalizedGivingType = (data.givingType || selectedCategory).trim();
 
   // Auto-persist custom giving type to church settings if not already present
   if (church && normalizedGivingType && !STANDARD_GIVING_TYPES.includes(normalizedGivingType)) {
@@ -1037,6 +1147,8 @@ router.post('/giving', async (req: AuthenticatedRequest, res: Response) => {
     phone: memberPhone,
     amount: numAmount,
     currency: church?.settings.currency || 'GH₵',
+    givingCategory: selectedCategory,
+    category: selectedCategory,
     givingType: normalizedGivingType,
     date: data.date || now.slice(0, 10),
     paymentMethod: data.paymentMethod || 'Cash',
@@ -1068,7 +1180,7 @@ router.post('/giving', async (req: AuthenticatedRequest, res: Response) => {
       userId: req.user?.id || 'finance',
       userName: req.user?.fullName || 'Finance Officer',
       action: 'GIVING_RECORDED',
-      details: `Recorded ${newGiving.givingType} of ${newGiving.currency}${newGiving.amount} from ${newGiving.memberName}. Receipt: ${newGiving.receiptNumber}.`,
+      details: `Recorded ${newGiving.givingCategory} (${newGiving.givingType}) of ${newGiving.currency}${newGiving.amount} from ${newGiving.memberName}. Receipt: ${newGiving.receiptNumber}.`,
       timestamp: now,
     },
     ...logs.slice(0, 499),
@@ -1078,6 +1190,128 @@ router.post('/giving', async (req: AuthenticatedRequest, res: Response) => {
     giving: newGiving,
     smsNotification: smsResult ? { sent: smsResult.success, message: smsResult.smsMessage } : null,
   });
+});
+
+// EDIT CONTRIBUTION (Requirement: Add/Edit Giving with Category update & moving between tabs)
+router.put('/giving/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const { id } = req.params;
+  const data = req.body;
+
+  const givingList = db.get('giving');
+  const existing = givingList.find(g => g.id === id && g.churchId === churchId);
+
+  if (!existing) {
+    res.status(404).json({ error: 'Giving record not found.' });
+    return;
+  }
+
+  let numAmount = existing.amount;
+  if (data.amount !== undefined) {
+    numAmount = parseFloat(data.amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      res.status(400).json({ error: 'Please enter a valid amount.' });
+      return;
+    }
+  }
+
+  // Handle giving category change
+  let updatedCategory = existing.givingCategory || existing.category || 'Tithes';
+  if (data.givingCategory && GIVING_CATEGORIES.includes(data.givingCategory)) {
+    updatedCategory = data.givingCategory;
+  } else if (data.category && GIVING_CATEGORIES.includes(data.category)) {
+    updatedCategory = data.category;
+  }
+
+  let memberName = existing.memberName;
+  let memberPhone = existing.phone;
+  if (data.memberId !== undefined) {
+    if (data.memberId) {
+      const member = db.get('members').find(m => m.id === data.memberId && m.churchId === churchId);
+      if (member) {
+        memberName = member.fullName;
+        memberPhone = data.phone || member.phone;
+      }
+    } else {
+      memberName = data.memberName || existing.memberName;
+      memberPhone = data.phone !== undefined ? data.phone : existing.phone;
+    }
+  } else if (data.memberName) {
+    memberName = data.memberName;
+  }
+
+  const updatedRecord: GivingRecord = {
+    ...existing,
+    memberId: data.memberId !== undefined ? data.memberId : existing.memberId,
+    memberName,
+    phone: memberPhone,
+    amount: numAmount,
+    givingCategory: updatedCategory,
+    category: updatedCategory,
+    givingType: (data.givingType || existing.givingType || updatedCategory).trim(),
+    date: data.date || existing.date,
+    paymentMethod: data.paymentMethod || existing.paymentMethod,
+    referenceNumber: data.referenceNumber !== undefined ? data.referenceNumber : existing.referenceNumber,
+    campaignOrProject: data.campaignOrProject !== undefined ? data.campaignOrProject : existing.campaignOrProject,
+    notes: data.notes !== undefined ? data.notes : existing.notes,
+    recordedBy: data.recordedBy || existing.recordedBy,
+    updatedAt: new Date().toISOString(),
+  };
+
+  db.update('giving', list => list.map(g => (g.id === id ? updatedRecord : g)));
+  await db.saveDoc('giving', id, updatedRecord).catch(console.error);
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'finance',
+      userName: req.user?.fullName || 'Finance Officer',
+      action: 'GIVING_UPDATED',
+      details: `Updated ${updatedRecord.givingCategory} (${updatedRecord.receiptNumber}) to ${updatedRecord.currency}${updatedRecord.amount}.`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({
+    message: 'Contribution updated successfully.',
+    giving: updatedRecord,
+  });
+});
+
+// DELETE CONTRIBUTION
+router.delete('/giving/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const { id } = req.params;
+
+  const givingList = db.get('giving');
+  const existing = givingList.find(g => g.id === id && g.churchId === churchId);
+
+  if (!existing) {
+    res.status(404).json({ error: 'Giving record not found.' });
+    return;
+  }
+
+  db.update('giving', list => list.filter(g => g.id !== id));
+  await db.deleteDoc('giving', id).catch(console.error);
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'finance',
+      userName: req.user?.fullName || 'Finance Officer',
+      action: 'GIVING_DELETED',
+      details: `Deleted giving record ${existing.receiptNumber} (${existing.givingCategory} - ${existing.currency}${existing.amount}).`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({ message: 'Contribution deleted successfully.' });
 });
 
 // ================= FINANCE ACCOUNTS & EXPENSES ================= //
@@ -1172,6 +1406,7 @@ router.post('/expense-categories', async (req: AuthenticatedRequest, res: Respon
 
   res.status(201).json({
     message: `Custom expense category "${trimmed}" added successfully.`,
+    standardCategories: STANDARD_EXPENSE_CATEGORIES,
     customCategories: updatedCustom,
     allCategories: Array.from(new Set([...STANDARD_EXPENSE_CATEGORIES, ...updatedCustom])),
   });
@@ -1200,6 +1435,7 @@ router.delete('/expense-categories/:name', async (req: AuthenticatedRequest, res
 
   res.json({
     message: `Expense category "${nameToDelete}" removed.`,
+    standardCategories: STANDARD_EXPENSE_CATEGORIES,
     customCategories: updatedCustom,
     allCategories: Array.from(new Set([...STANDARD_EXPENSE_CATEGORIES, ...updatedCustom])),
   });
@@ -1279,7 +1515,7 @@ const STANDARD_PASTORAL_CATEGORIES = [
   'Prayer Request',
 ];
 
-router.get('/pastoral-categories', (req: AuthenticatedRequest, res: Response) => {
+router.get(['/pastoral-categories', '/pastoral-care/categories'], (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
   const customCategories: string[] = church?.settings?.customPastoralCategories || [];
@@ -1290,7 +1526,7 @@ router.get('/pastoral-categories', (req: AuthenticatedRequest, res: Response) =>
   });
 });
 
-router.post('/pastoral-categories', async (req: AuthenticatedRequest, res: Response) => {
+router.post(['/pastoral-categories', '/pastoral-care/categories'], async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { name } = req.body;
   const trimmed = (name || '').trim();
@@ -1308,16 +1544,20 @@ router.post('/pastoral-categories', async (req: AuthenticatedRequest, res: Respo
   const updatedSettings = { ...church.settings, customPastoralCategories: updated };
   db.update('churches', list => list.map(c => c.id === churchId ? { ...c, settings: updatedSettings as any } : c));
   await db.saveDoc('churches', churchId, { ...church, settings: updatedSettings }).catch(console.error);
-  res.status(201).json({ customCategories: updated });
+  res.status(201).json({
+    standardCategories: STANDARD_PASTORAL_CATEGORIES,
+    customCategories: updated,
+    allCategories: Array.from(new Set([...STANDARD_PASTORAL_CATEGORIES, ...updated])),
+  });
 });
 
-router.get('/pastoral', (req: AuthenticatedRequest, res: Response) => {
+router.get(['/pastoral', '/pastoral-care'], (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const cases = db.get('pastoralCases').filter(p => p.churchId === churchId);
   res.json(cases);
 });
 
-router.post('/pastoral', async (req: AuthenticatedRequest, res: Response) => {
+router.post(['/pastoral', '/pastoral-care'], async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { caseType, customCaseType, isCustom, memberNameOrSubject, phone, assignedPastor, priority, confidentialNotes, followUpDate } = req.body;
 
@@ -1372,7 +1612,7 @@ router.post('/pastoral', async (req: AuthenticatedRequest, res: Response) => {
   res.status(201).json(newCase);
 });
 
-router.put('/pastoral/:id', (req: AuthenticatedRequest, res: Response) => {
+router.put(['/pastoral/:id', '/pastoral-care/:id'], (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const updates = req.body;
@@ -1421,7 +1661,11 @@ router.post('/department-categories', async (req: AuthenticatedRequest, res: Res
   const updatedSettings = { ...church.settings, customDepartmentCategories: updated };
   db.update('churches', list => list.map(c => c.id === churchId ? { ...c, settings: updatedSettings as any } : c));
   await db.saveDoc('churches', churchId, { ...church, settings: updatedSettings }).catch(console.error);
-  res.status(201).json({ customCategories: updated });
+  res.status(201).json({
+    standardCategories: STANDARD_DEPARTMENT_CATEGORIES,
+    customCategories: updated,
+    allCategories: Array.from(new Set([...STANDARD_DEPARTMENT_CATEGORIES, ...updated])),
+  });
 });
 
 router.get('/departments', (req: AuthenticatedRequest, res: Response) => {
@@ -2374,35 +2618,55 @@ router.get('/staff', (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
+  const church = db.get('churches').find(c => c.id === churchId);
   const users = db.get('users').filter(u => u.churchId === churchId);
-  // Return staff without sensitive passwordHash
-  const safeStaff = users.map(u => ({
-    id: u.id,
-    churchId: u.churchId,
-    fullName: u.fullName,
-    username: u.username,
-    email: u.email,
-    phone: u.phone,
-    role: u.role,
-    customRoleTitle: u.customRoleTitle,
-    permissions: (u.permissions && u.permissions.length > 0) ? u.permissions : getDefaultRolePermissions(u.role),
-    status: u.status,
-    createdAt: u.createdAt,
-    lastLoginAt: u.lastLoginAt,
-  }));
+
+  // Return staff without sensitive passwordHash, with explicit accountType and differentiation
+  const safeStaff = users.map(u => {
+    // A user is the primary church account if marked isPrimaryAccount or if it is the church owner/admin matching church credentials
+    const isPrimary = Boolean(
+      u.isPrimaryAccount ||
+      u.role === 'CHURCH_OWNER' ||
+      (!u.isAssignedRole && !u.assignedMemberId && (
+        (church?.adminEmail && u.email && u.email.toLowerCase() === church.adminEmail.toLowerCase()) ||
+        (church?.username && u.username && u.username.toLowerCase() === church.username.toLowerCase()) ||
+        u.role === 'CHURCH_ADMINISTRATOR'
+      ))
+    );
+
+    return {
+      id: u.id,
+      churchId: u.churchId,
+      fullName: u.fullName,
+      username: u.username,
+      email: u.email,
+      phone: u.phone,
+      role: u.role,
+      customRoleTitle: u.customRoleTitle,
+      assignedMemberId: u.assignedMemberId,
+      assignedMemberName: u.assignedMemberName,
+      isPrimaryAccount: isPrimary,
+      isAssignedRole: !isPrimary,
+      accountType: isPrimary ? ('CHURCH_ACCOUNT' as const) : ('ASSIGNED_MEMBER_ROLE' as const),
+      permissions: (u.permissions && u.permissions.length > 0) ? u.permissions : getDefaultRolePermissions(u.role),
+      status: u.status,
+      createdAt: u.createdAt,
+      lastLoginAt: u.lastLoginAt,
+    };
+  });
 
   res.json(safeStaff);
 });
 
-// POST /api/church/staff - Create new staff member
-router.post('/staff', (req: AuthenticatedRequest, res: Response) => {
+// POST /api/church/staff - Create new staff member or assign role to member
+router.post('/staff', async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   if (!churchId) {
     res.status(403).json({ error: 'Church ID not identified.' });
     return;
   }
 
-  const { fullName, username, email, phone, role, customRoleTitle, permissions, password } = req.body;
+  const { fullName, username, email, phone, role, customRoleTitle, permissions, password, assignedMemberId } = req.body;
 
   if (!fullName || !fullName.trim()) {
     res.status(400).json({ error: 'Staff member name is required.' });
@@ -2444,6 +2708,14 @@ router.post('/staff', (req: AuthenticatedRequest, res: Response) => {
     ? permissions
     : getDefaultRolePermissions(role);
 
+  let assignedMemberName: string | undefined;
+  if (assignedMemberId) {
+    const matchedMember = db.get('members').find(m => m.id === assignedMemberId && m.churchId === churchId);
+    if (matchedMember) {
+      assignedMemberName = matchedMember.fullName;
+    }
+  }
+
   const newStaffUser: User = {
     id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     churchId,
@@ -2453,6 +2725,11 @@ router.post('/staff', (req: AuthenticatedRequest, res: Response) => {
     phone: (phone || '').trim(),
     role,
     customRoleTitle: (customRoleTitle || '').trim() || undefined,
+    assignedMemberId: assignedMemberId || undefined,
+    assignedMemberName,
+    isAssignedRole: true,
+    isPrimaryAccount: false,
+    accountType: 'ASSIGNED_MEMBER_ROLE',
     permissions: assignedPermissions,
     passwordHash: hashPassword(password),
     status: 'ACTIVE',
@@ -2460,6 +2737,7 @@ router.post('/staff', (req: AuthenticatedRequest, res: Response) => {
   };
 
   db.update('users', list => [...list, newStaffUser]);
+  await db.saveDoc('users', newStaffUser.id, newStaffUser).catch(console.error);
 
   // Audit log
   db.update('auditLogs', logs => [
@@ -2469,22 +2747,22 @@ router.post('/staff', (req: AuthenticatedRequest, res: Response) => {
       userId: req.user?.id || 'admin',
       userName: req.user?.fullName || 'Administrator',
       action: 'STAFF_CREATED',
-      details: `Created staff member ${newStaffUser.fullName} with role ${newStaffUser.customRoleTitle || newStaffUser.role} (username: ${newStaffUser.username}).`,
+      details: `Assigned role ${newStaffUser.customRoleTitle || newStaffUser.role} to ${newStaffUser.fullName}${assignedMemberName ? ` (Member: ${assignedMemberName})` : ''} (username: ${newStaffUser.username}).`,
       timestamp: new Date().toISOString(),
     },
-    ...logs,
+    ...logs.slice(0, 499),
   ]);
 
   const { passwordHash, ...safeUser } = newStaffUser;
   res.status(201).json({
     success: true,
-    message: `Staff member ${newStaffUser.fullName} added successfully.`,
+    message: `Role "${newStaffUser.customRoleTitle || newStaffUser.role}" assigned to ${newStaffUser.fullName} successfully. Login username: "${newStaffUser.username}".`,
     staff: safeUser,
   });
 });
 
 // PUT /api/church/staff/:id - Update staff member
-router.put('/staff/:id', (req: AuthenticatedRequest, res: Response) => {
+router.put('/staff/:id', async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const staffId = req.params.id;
 
@@ -2494,7 +2772,7 @@ router.put('/staff/:id', (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  const { fullName, email, phone, role, customRoleTitle, permissions, status, password } = req.body;
+  const { fullName, email, phone, role, customRoleTitle, permissions, status, password, assignedMemberId } = req.body;
 
   let updatedPasswordHash = targetUser.passwordHash;
   if (password && password.trim().length >= 4) {
@@ -2504,6 +2782,14 @@ router.put('/staff/:id', (req: AuthenticatedRequest, res: Response) => {
   const updatedPermissions = Array.isArray(permissions)
     ? permissions
     : role ? getDefaultRolePermissions(role) : targetUser.permissions;
+
+  let assignedMemberName = targetUser.assignedMemberName;
+  if (assignedMemberId) {
+    const matchedMember = db.get('members').find(m => m.id === assignedMemberId && m.churchId === churchId);
+    if (matchedMember) {
+      assignedMemberName = matchedMember.fullName;
+    }
+  }
 
   db.update('users', list =>
     list.map(u => {
@@ -2515,6 +2801,8 @@ router.put('/staff/:id', (req: AuthenticatedRequest, res: Response) => {
           phone: phone !== undefined ? phone.trim() : u.phone,
           role: role || u.role,
           customRoleTitle: customRoleTitle !== undefined ? (customRoleTitle.trim() || undefined) : u.customRoleTitle,
+          assignedMemberId: assignedMemberId !== undefined ? (assignedMemberId || undefined) : u.assignedMemberId,
+          assignedMemberName: assignedMemberName || u.assignedMemberName,
           permissions: updatedPermissions,
           status: status || u.status,
           passwordHash: updatedPasswordHash,
@@ -2525,39 +2813,75 @@ router.put('/staff/:id', (req: AuthenticatedRequest, res: Response) => {
   );
 
   const updated = db.get('users').find(u => u.id === staffId);
+  if (updated) {
+    await db.saveDoc('users', staffId, updated).catch(console.error);
+  }
+
   const { passwordHash, ...safeUpdated } = updated!;
 
   res.json({
     success: true,
-    message: `Staff member ${safeUpdated.fullName} updated successfully.`,
+    message: `Role details for ${safeUpdated.fullName} updated successfully.`,
     staff: safeUpdated,
   });
 });
 
-// DELETE /api/church/staff/:id - Remove staff member
-router.delete('/staff/:id', (req: AuthenticatedRequest, res: Response) => {
+// DELETE /api/church/staff/:id - Remove staff member / delete assigned member role
+router.delete('/staff/:id', async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const staffId = req.params.id;
 
   if (staffId === req.user?.id) {
-    res.status(400).json({ error: 'You cannot remove your own active login account.' });
+    res.status(400).json({ error: 'You cannot remove your own active login session account.' });
     return;
   }
 
+  const church = db.get('churches').find(c => c.id === churchId);
   const targetUser = db.get('users').find(u => u.id === staffId && u.churchId === churchId);
   if (!targetUser) {
-    res.status(404).json({ error: 'Staff member not found in this church.' });
+    res.status(404).json({ error: 'Role assignment or staff member not found in this church.' });
     return;
   }
 
-  if (targetUser.role === 'CHURCH_OWNER' || targetUser.role === 'SUPER_ADMIN') {
-    res.status(403).json({ error: 'Primary church owner account cannot be deleted.' });
+  // Differentiate church account from member assigned roles
+  const isPrimary = Boolean(
+    targetUser.isPrimaryAccount ||
+    targetUser.role === 'CHURCH_OWNER' ||
+    targetUser.role === 'SUPER_ADMIN' ||
+    (!targetUser.isAssignedRole && !targetUser.assignedMemberId && (
+      (church?.adminEmail && targetUser.email && targetUser.email.toLowerCase() === church.adminEmail.toLowerCase()) ||
+      (church?.username && targetUser.username && targetUser.username.toLowerCase() === church.username.toLowerCase()) ||
+      targetUser.role === 'CHURCH_ADMINISTRATOR'
+    ))
+  );
+
+  if (isPrimary) {
+    res.status(403).json({ error: 'The primary church owner account is protected and cannot be deleted. You can delete assigned member and staff roles.' });
     return;
   }
 
+  // Delete from in-memory state and Firestore
   db.update('users', list => list.filter(u => u.id !== staffId));
+  await db.deleteDoc('users', staffId).catch(console.error);
 
-  res.json({ success: true, message: `Staff member ${targetUser.fullName} removed from church.` });
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: 'STAFF_ROLE_DELETED',
+      details: `Deleted assigned member role "${targetUser.customRoleTitle || targetUser.role}" for ${targetUser.fullName} (username: ${targetUser.username}).`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({
+    success: true,
+    message: `Assigned role "${targetUser.customRoleTitle || targetUser.role}" for ${targetUser.fullName} has been deleted successfully.`,
+  });
 });
 
 export default router;

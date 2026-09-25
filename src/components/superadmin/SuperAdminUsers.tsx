@@ -54,7 +54,7 @@ export const SuperAdminUsers: React.FC<Props> = ({ churches }) => {
       setLoading(true);
       setError(null);
       const res = await ApiClient.get('/api/super-admin/users');
-      setUsers(res);
+      setUsers(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load user accounts.');
     } finally {
@@ -119,15 +119,16 @@ export const SuperAdminUsers: React.FC<Props> = ({ churches }) => {
     }
   };
 
-  const churchMap = new Map<string, string>(churches.map(c => [c.id, c.name]));
+  const churchMap = new Map<string, string>((churches || []).map(c => [c.id, c.name]));
 
-  const filteredUsers = users.filter(u => {
+  const filteredUsers = (users || []).filter(u => {
     const churchName = u.churchId ? churchMap.get(u.churchId) : '';
+    const q = (searchTerm || '').toLowerCase();
     const matchesSearch =
-      u.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (churchName ? churchName.toLowerCase().includes(searchTerm.toLowerCase()) : false);
+      (u.fullName || '').toLowerCase().includes(q) ||
+      (u.username || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q) ||
+      (churchName ? churchName.toLowerCase().includes(q) : false);
 
     const matchesRole = roleFilter === 'ALL' || u.role === roleFilter;
 
@@ -228,7 +229,7 @@ export const SuperAdminUsers: React.FC<Props> = ({ churches }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredUsers.map(u => (
+              {(filteredUsers || []).map(u => (
                 <tr key={u.id} className="hover:bg-slate-50/60 transition">
                   <td className="py-3 px-4">
                     <div className="font-bold text-slate-900">{u.fullName}</div>

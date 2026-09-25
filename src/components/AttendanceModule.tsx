@@ -17,6 +17,7 @@ import {
 import { ApiClient } from '../api';
 import { ChurchService, AttendanceRecord, Member } from '../types';
 import { useMembers } from '../context/MembersContext';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 export const AttendanceModule: React.FC = () => {
   const { members } = useMembers();
@@ -43,14 +44,16 @@ export const AttendanceModule: React.FC = () => {
   const [finalizationResult, setFinalizationResult] = useState<any | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   const loadServices = async () => {
     try {
       setLoading(true);
       const srvList = await ApiClient.get('/api/church/services');
-      setServices(srvList);
+      setServices(Array.isArray(srvList) ? srvList : []);
 
-      if (srvList.length > 0 && !selectedService) {
+      if (Array.isArray(srvList) && srvList.length > 0 && !selectedService) {
         setSelectedService(srvList[0]);
         await loadAttendanceForService(srvList[0].id);
       }
@@ -64,7 +67,7 @@ export const AttendanceModule: React.FC = () => {
   const loadAttendanceForService = async (serviceId: string) => {
     try {
       const records = await ApiClient.get(`/api/church/services/${serviceId}/attendance`);
-      setAttendanceRecords(records);
+      setAttendanceRecords(Array.isArray(records) ? records : []);
     } catch (err) {
       console.error(err);
     }
@@ -147,8 +150,8 @@ export const AttendanceModule: React.FC = () => {
       setNotice(res.message);
       // Reload services to update finalized badge
       const updatedList = await ApiClient.get('/api/church/services');
-      setServices(updatedList);
-      const updatedCurrent = updatedList.find((s: ChurchService) => s.id === selectedService.id);
+      setServices(Array.isArray(updatedList) ? updatedList : []);
+      const updatedCurrent = (Array.isArray(updatedList) ? updatedList : []).find((s: ChurchService) => s.id === selectedService.id);
       if (updatedCurrent) setSelectedService(updatedCurrent);
     } catch (err: any) {
       setError(err.message || 'Failed to finalize attendance.');
@@ -157,15 +160,15 @@ export const AttendanceModule: React.FC = () => {
     }
   };
 
-  const presentCount = attendanceRecords.filter(a => a.status === 'Present').length;
-  const absentCount = attendanceRecords.filter(a => a.status === 'Absent').length;
-  const excusedCount = attendanceRecords.filter(a => a.status === 'Excused').length;
+  const presentCount = (attendanceRecords || []).filter(a => a.status === 'Present').length;
+  const absentCount = (attendanceRecords || []).filter(a => a.status === 'Absent').length;
+  const excusedCount = (attendanceRecords || []).filter(a => a.status === 'Excused').length;
 
-  const filteredMembers = members.filter(
+  const filteredMembers = (members || []).filter(
     m =>
-      m.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.phone.includes(searchTerm) ||
-      m.memberCode.toLowerCase().includes(searchTerm)
+      (m.fullName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (m.phone || '').includes(searchTerm) ||
+      (m.memberCode || '').toLowerCase().includes(searchTerm)
   );
 
   return (
@@ -220,7 +223,7 @@ export const AttendanceModule: React.FC = () => {
           Service Sessions
         </span>
         <div className="flex space-x-3 overflow-x-auto pb-2 scrollbar-thin">
-          {services.map(srv => {
+          {(services || []).map(srv => {
             const isSelected = selectedService?.id === srv.id;
             return (
               <button
@@ -357,8 +360,8 @@ export const AttendanceModule: React.FC = () => {
 
           {/* Roll Call Members List */}
           <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
-            {filteredMembers.map(member => {
-              const record = attendanceRecords.find(a => a.memberId === member.id);
+            {(filteredMembers || []).map(member => {
+              const record = (attendanceRecords || []).find(a => a.memberId === member.id);
               const status = record?.status;
 
               return (

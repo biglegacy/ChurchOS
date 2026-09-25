@@ -30,6 +30,7 @@ import { ApiClient } from '../api';
 import { DepartmentOrGroup, Church, Member, SmsMessage } from '../types';
 import { normalizePhoneNumber, detectGhanaNetwork } from '../utils/phoneUtils';
 import { useMembers } from '../context/MembersContext';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 interface Props {
   church?: Church | null;
@@ -93,6 +94,9 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
   const [reconciling, setReconciling] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
+  useAutoDismissNotification(sendResult, setSendResult, 2000);
 
   // SMS History Search & Filters
   const [historySearchQuery, setHistorySearchQuery] = useState('');
@@ -125,13 +129,13 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
 
   // Filtered members for the selection table
   const filteredMembers = useMemo(() => {
-    return members.filter(m => {
+    return (members || []).filter(m => {
       const matchesStatus =
         memberStatusFilter === 'ALL' || m.membershipStatus === memberStatusFilter;
       const q = memberSearchQuery.toLowerCase().trim();
       const matchesQuery =
         !q ||
-        m.fullName.toLowerCase().includes(q) ||
+        (m.fullName || '').toLowerCase().includes(q) ||
         (m.phone && m.phone.toLowerCase().includes(q)) ||
         (m.memberCode && m.memberCode.toLowerCase().includes(q));
       return matchesStatus && matchesQuery;
@@ -140,7 +144,7 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
 
   // Map of selected members objects
   const selectedMembersList = useMemo(() => {
-    return members.filter(m => selectedMemberIds.includes(m.id));
+    return (members || []).filter(m => (selectedMemberIds || []).includes(m.id));
   }, [members, selectedMemberIds]);
 
   // Validation breakdown for selected members
@@ -167,7 +171,7 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
   };
 
   const handleSelectAllFiltered = () => {
-    const filteredIds = filteredMembers.map(m => m.id);
+    const filteredIds = (filteredMembers || []).map(m => m.id);
     setSelectedMemberIds(prev => {
       const combined = new Set([...prev, ...filteredIds]);
       return Array.from(combined);
@@ -283,7 +287,7 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
 
   // Filtered SMS History Logs
   const filteredSmsLogs = useMemo(() => {
-    return smsLogs.filter(log => {
+    return (smsLogs || []).filter(log => {
       // Recipient search
       const q = historySearchQuery.toLowerCase().trim();
       const matchesSearch =
@@ -793,7 +797,7 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
                 onChange={e => setSelectedDepartmentId(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-teal-700"
               >
-                {departments.map(d => (
+                {(departments || []).map(d => (
                   <option key={d.id} value={d.id}>
                     {d.name} ({d.category || d.type || 'Department'})
                   </option>
@@ -1208,7 +1212,7 @@ export const SmsModule: React.FC<Props> = ({ church, onNavigateTab }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredSmsLogs.map(log => {
+                {(filteredSmsLogs || []).map(log => {
                   const isDelivered = log.status === 'Delivered';
                   const isSubmitted = log.status === 'Submitted' || log.status === 'Pending';
                   const isUndelivered = log.status === 'Undelivered' || log.status === 'Expired';

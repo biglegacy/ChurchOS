@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Lock, Mail, Eye, EyeOff, ArrowRight, AlertCircle, CheckCircle2, Building2, User, Phone, MapPin, ChevronDown, ChevronUp } from 'lucide-react';
 import { ApiClient } from '../api';
 import { RegisterChurchModal } from './RegisterChurchModal';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 interface Props {
   onLoginSuccess: (user: any, church: any, redirectTo: string) => void;
@@ -18,6 +19,8 @@ export const LoginView: React.FC<Props> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  useAutoDismissNotification(error, setError, 2000);
+  useAutoDismissNotification(notice, setNotice, 2000);
 
   // Register form state
   const [regData, setRegData] = useState({

@@ -13,6 +13,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { ApiClient } from '../../api';
+import { useAutoDismissNotification } from '../../utils/useAutoDismissNotification';
 
 export const SuperAdminArkeselConfig: React.FC = () => {
   const [platformSettings, setPlatformSettings] = useState<any>(null);
@@ -23,6 +24,8 @@ export const SuperAdminArkeselConfig: React.FC = () => {
   const [savingSettings, setSavingSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   // Test SMS
   const [testPhone, setTestPhone] = useState('');

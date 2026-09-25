@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { Church } from '../types';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 interface Props {
   church?: Church | null;
@@ -84,6 +85,8 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   // Live Gateway Test Connection State (Requirement 4)
   const [testPhone, setTestPhone] = useState('');
@@ -554,7 +557,7 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {DEFAULT_CONTRIBUTION_TYPES.map(type => {
-                const isSelected = formData.autoContributionSmsTypes.includes(type);
+                const isSelected = (formData.autoContributionSmsTypes || []).includes(type);
                 return (
                   <button
                     key={type}
@@ -578,11 +581,11 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
             </div>
 
             {/* Custom Types */}
-            {formData.autoContributionSmsTypes.filter(t => !DEFAULT_CONTRIBUTION_TYPES.includes(t)).length > 0 && (
+            {(formData.autoContributionSmsTypes || []).filter(t => !DEFAULT_CONTRIBUTION_TYPES.includes(t)).length > 0 && (
               <div className="pt-2">
                 <span className="text-[11px] font-semibold text-slate-500">Custom Trigger Types:</span>
                 <div className="flex flex-wrap gap-1.5 mt-1">
-                  {formData.autoContributionSmsTypes
+                  {(formData.autoContributionSmsTypes || [])
                     .filter(t => !DEFAULT_CONTRIBUTION_TYPES.includes(t))
                     .map(ct => (
                       <span

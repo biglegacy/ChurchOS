@@ -15,6 +15,7 @@ import {
 import { ApiClient } from '../api';
 import { Visitor, NewConvert } from '../types';
 import { useMembers } from '../context/MembersContext';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 export const VisitorsModule: React.FC = () => {
   const { refreshMembers } = useMembers();
@@ -57,16 +58,18 @@ export const VisitorsModule: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   const loadData = async () => {
     try {
       setLoading(true);
       const [vRes, cRes] = await Promise.all([
-        ApiClient.get('/api/church/visitors'),
-        ApiClient.get('/api/church/visitors/converts'),
+        ApiClient.get('/api/church/visitors').catch(() => []),
+        ApiClient.get('/api/church/visitors/converts').catch(() => []),
       ]);
-      setVisitors(vRes);
-      setConverts(cRes);
+      setVisitors(Array.isArray(vRes) ? vRes : []);
+      setConverts(Array.isArray(cRes) ? cRes : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load visitors.');
     } finally {
@@ -243,10 +246,10 @@ export const VisitorsModule: React.FC = () => {
       {activeTab === 'visitors' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="divide-y divide-slate-100">
-            {visitors.length === 0 ? (
+            {(visitors || []).length === 0 ? (
               <p className="p-8 text-center text-xs text-slate-400">No visitor records found.</p>
             ) : (
-              visitors.map(v => (
+              (visitors || []).map(v => (
                 <div key={v.id} className="p-4 sm:p-5 hover:bg-slate-50/60 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                   <div>
                     <div className="flex items-center space-x-2">
@@ -296,10 +299,10 @@ export const VisitorsModule: React.FC = () => {
       {activeTab === 'converts' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="divide-y divide-slate-100">
-            {converts.length === 0 ? (
+            {(converts || []).length === 0 ? (
               <p className="p-8 text-center text-xs text-slate-400">No discipleship converts enrolled.</p>
             ) : (
-              converts.map(c => (
+              (converts || []).map(c => (
                 <div key={c.id} className="p-4 sm:p-5 hover:bg-slate-50/60 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                   <div>
                     <div className="flex items-center space-x-2">

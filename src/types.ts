@@ -26,6 +26,11 @@ export interface User {
   churchId?: string;
   phone?: string;
   status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  isPrimaryAccount?: boolean;
+  isAssignedRole?: boolean;
+  accountType?: 'CHURCH_ACCOUNT' | 'ASSIGNED_MEMBER_ROLE';
+  assignedMemberId?: string;
+  assignedMemberName?: string;
   lastLoginAt?: string;
 }
 
@@ -275,6 +280,27 @@ export interface AttendanceRecord {
   createdAt: string;
 }
 
+export type GivingCategoryType =
+  | 'Tithes'
+  | 'Offerings'
+  | 'Donations'
+  | 'Special Giving'
+  | 'Building Fund'
+  | 'Missions'
+  | 'Welfare'
+  | 'Other Giving';
+
+export const GIVING_CATEGORIES: GivingCategoryType[] = [
+  'Tithes',
+  'Offerings',
+  'Donations',
+  'Special Giving',
+  'Building Fund',
+  'Missions',
+  'Welfare',
+  'Other Giving',
+];
+
 export interface GivingRecord {
   id: string;
   churchId: string;
@@ -283,9 +309,11 @@ export interface GivingRecord {
   phone?: string;
   amount: number;
   currency: string;
-  givingType: 'Tithe' | 'Offering' | 'First Fruit' | 'Thanksgiving' | 'Building Fund' | 'Missions' | 'Welfare' | 'Special Offering' | 'Special Contributions' | 'Donation' | string;
+  givingCategory: GivingCategoryType | string;
+  category: GivingCategoryType | string;
+  givingType: string;
   date: string;
-  paymentMethod: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Cheque';
+  paymentMethod: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Cheque' | 'POS Card' | string;
   referenceNumber: string;
   campaignOrProject?: string;
   receiptNumber: string;
@@ -294,6 +322,7 @@ export interface GivingRecord {
   smsMessageId?: string;
   recordedBy: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ExpenseRecord {

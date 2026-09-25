@@ -42,6 +42,11 @@ export interface User {
   churchId?: string; // null for SUPER_ADMIN
   phone?: string;
   status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  isPrimaryAccount?: boolean;
+  isAssignedRole?: boolean;
+  accountType?: 'CHURCH_ACCOUNT' | 'ASSIGNED_MEMBER_ROLE';
+  assignedMemberId?: string;
+  assignedMemberName?: string;
   createdAt: string;
   lastLoginAt?: string;
 }
@@ -255,15 +260,80 @@ export interface AttendanceRecord {
   createdAt?: string;
 }
 
+export type GivingCategory =
+  | 'Tithes'
+  | 'Offerings'
+  | 'Donations'
+  | 'Special Giving'
+  | 'Building Fund'
+  | 'Missions'
+  | 'Welfare'
+  | 'Other Giving';
+
+export const GIVING_CATEGORIES: GivingCategory[] = [
+  'Tithes',
+  'Offerings',
+  'Donations',
+  'Special Giving',
+  'Building Fund',
+  'Missions',
+  'Welfare',
+  'Other Giving',
+];
+
+export function resolveReliableGivingCategory(giving: {
+  givingCategory?: string;
+  category?: string;
+  givingType?: string;
+}): GivingCategory {
+  const existingCat = (giving.givingCategory || giving.category || '').trim();
+  if (existingCat) {
+    const lower = existingCat.toLowerCase();
+    if (lower === 'tithes' || lower === 'tithe') return 'Tithes';
+    if (lower === 'offerings' || lower === 'offering') return 'Offerings';
+    if (lower === 'donations' || lower === 'donation') return 'Donations';
+    if (
+      lower === 'special giving' ||
+      lower === 'special offering' ||
+      lower === 'special contributions' ||
+      lower === 'special'
+    )
+      return 'Special Giving';
+    if (lower === 'building fund' || lower === 'building') return 'Building Fund';
+    if (lower === 'missions' || lower === 'mission') return 'Missions';
+    if (lower === 'welfare' || lower === 'benevolence') return 'Welfare';
+    if (lower === 'other giving' || lower === 'other') return 'Other Giving';
+  }
+
+  const type = (giving.givingType || '').trim().toLowerCase();
+  if (type === 'tithe' || type === 'tithes') return 'Tithes';
+  if (type === 'offering' || type === 'offerings') return 'Offerings';
+  if (type === 'donation' || type === 'donations') return 'Donations';
+  if (
+    type === 'special giving' ||
+    type === 'special offering' ||
+    type === 'special contributions' ||
+    type === 'special'
+  )
+    return 'Special Giving';
+  if (type === 'building fund' || type === 'building') return 'Building Fund';
+  if (type === 'missions' || type === 'mission') return 'Missions';
+  if (type === 'welfare' || type === 'benevolence') return 'Welfare';
+
+  return 'Other Giving';
+}
+
 export interface GivingRecord {
   id: string;
   churchId: string;
   receiptNumber: string;
   referenceNumber?: string;
-  givingType: 'Tithe' | 'Offering' | 'Building Fund' | 'Missions' | 'Welfare' | 'Thanksgiving' | 'First Fruit' | 'Special Offering' | 'Donation' | 'Other';
+  givingCategory: GivingCategory | string;
+  category: GivingCategory | string;
+  givingType: string;
   amount: number;
   currency: string;
-  paymentMethod: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'POS Card' | 'Cheque';
+  paymentMethod: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'POS Card' | 'Cheque' | string;
   mobileMoneyNumber?: string;
   mobileMoneyNetwork?: 'MTN' | 'Telecel' | 'AT' | 'Other';
   memberId?: string;
@@ -277,6 +347,7 @@ export interface GivingRecord {
   smsSent: boolean;
   smsMessageId?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ExpenseRecord {
@@ -834,6 +905,20 @@ class FirebaseDatabase {
         const su = initial.users[0];
         await setDoc(doc(this.firestore, 'users', su.id), sanitizeForFirestore(su));
         this.data.users = [su, ...this.data.users];
+      }
+
+      // 5. Database Migration: Ensure all giving records have strictly defined givingCategory and category
+      for (const g of this.data.giving) {
+        let changed = false;
+        if (!g.givingCategory || !g.category) {
+          const resolved = resolveReliableGivingCategory(g);
+          g.givingCategory = resolved;
+          g.category = resolved;
+          changed = true;
+        }
+        if (changed) {
+          await this.saveDoc('giving', g.id, g).catch(console.error);
+        }
       }
 
       this.isInitialized = true;

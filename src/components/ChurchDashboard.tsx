@@ -18,6 +18,7 @@ import {
 import { ApiClient } from '../api';
 import { Church } from '../types';
 import { UpcomingBirthdaysWidget } from './UpcomingBirthdaysWidget';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 interface Props {
   church?: Church | null;
@@ -29,6 +30,7 @@ export const ChurchDashboard: React.FC<Props> = ({ church, onNavigateTab, onQuic
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(error, setError, 2000);
 
   const loadDashboard = async () => {
     try {
@@ -59,8 +61,8 @@ export const ChurchDashboard: React.FC<Props> = ({ church, onNavigateTab, onQuic
   }
 
   const kpis = data?.kpis || {};
-  const upcomingEvents = data?.upcomingEvents || [];
-  const recentGiving = data?.recentGiving || [];
+  const upcomingEvents = Array.isArray(data?.upcomingEvents) ? data.upcomingEvents : [];
+  const recentGiving = Array.isArray(data?.recentGiving) ? data.recentGiving : [];
   const currency = church?.settings?.currency || 'GH₵';
 
   return (

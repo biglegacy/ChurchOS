@@ -85,28 +85,30 @@ export const MemberSelector: React.FC<MemberSelectorProps> = ({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
+  const safeMembers = useMemo(() => (Array.isArray(members) ? members : []), [members]);
+
   // Resolve currently selected member in single mode
   const currentSelectedMember = useMemo<Member | null>(() => {
     if (propSelectedMember) return propSelectedMember;
     if (typeof value === 'string' && value) {
-      return members.find(m => m.id === value) || null;
+      return safeMembers.find(m => m.id === value) || null;
     }
     return null;
-  }, [propSelectedMember, value, members]);
+  }, [propSelectedMember, value, safeMembers]);
 
   // Resolve currently selected members in multi mode
   const currentSelectedMembers = useMemo<Member[]>(() => {
     if (propSelectedMembers) return propSelectedMembers;
     if (Array.isArray(value)) {
-      return members.filter(m => value.includes(m.id));
+      return safeMembers.filter(m => value.includes(m.id));
     }
     return [];
-  }, [propSelectedMembers, value, members]);
+  }, [propSelectedMembers, value, safeMembers]);
 
   // Filtered members based on query, phone requirement, and status
   const searchResults = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return members.filter(m => {
+    return safeMembers.filter(m => {
       // Status filter
       if (statusFilter !== 'ALL' && m.membershipStatus !== statusFilter) {
         return false;
@@ -381,7 +383,7 @@ export const MemberSelector: React.FC<MemberSelectorProps> = ({
               {/* Footer status */}
               <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
                 <span>
-                  Showing {searchResults.length} of {members.length} registered member(s)
+                  Showing {searchResults.length} of {safeMembers.length} registered member(s)
                 </span>
                 <button
                   type="button"

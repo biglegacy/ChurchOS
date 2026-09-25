@@ -26,6 +26,7 @@ import {
   Send,
 } from 'lucide-react';
 import { ApiClient } from '../../api';
+import { useAutoDismissNotification } from '../../utils/useAutoDismissNotification';
 
 interface ChurchSmsSummary {
   id: string;
@@ -97,6 +98,8 @@ export const SuperAdminChurchSmsManager: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'DISABLED' | 'LOW_UNITS'>('ALL');
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   // Unit Adjustment Modal State
   const [adjustingChurch, setAdjustingChurch] = useState<ChurchSmsSummary | null>(null);
@@ -125,8 +128,8 @@ export const SuperAdminChurchSmsManager: React.FC = () => {
         ApiClient.get('/api/super-admin/sms/churches-summary'),
         ApiClient.get('/api/super-admin/sms/unit-audits'),
       ]);
-      setChurches(summaryRes.churches || []);
-      setAudits(auditsRes.audits || []);
+      setChurches(Array.isArray(summaryRes?.churches) ? summaryRes.churches : []);
+      setAudits(Array.isArray(auditsRes?.audits) ? auditsRes.audits : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load SMS management data.');
     } finally {
@@ -231,27 +234,28 @@ export const SuperAdminChurchSmsManager: React.FC = () => {
   };
 
   // Filtered churches
-  const filteredChurches = churches.filter(c => {
+  const filteredChurches = (churches || []).filter(c => {
+    const q = (searchQuery || '').toLowerCase();
     const matchesSearch =
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.city?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.seniorPastor?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.adminEmail?.toLowerCase().includes(searchQuery.toLowerCase());
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.city && c.city.toLowerCase().includes(q)) ||
+      (c.seniorPastor && c.seniorPastor.toLowerCase().includes(q)) ||
+      (c.adminEmail && c.adminEmail.toLowerCase().includes(q));
 
     if (!matchesSearch) return false;
 
     if (statusFilter === 'ACTIVE') return c.smsStatus === 'ACTIVE';
     if (statusFilter === 'DISABLED') return c.smsStatus === 'DISABLED';
-    if (statusFilter === 'LOW_UNITS') return c.smsCredits <= 50;
+    if (statusFilter === 'LOW_UNITS') return (c.smsCredits || 0) <= 50;
 
     return true;
   });
 
   // Calculate totals
-  const totalAllocated = churches.reduce((acc, c) => acc + (c.smsAllocatedUnits || 0), 0);
-  const totalUsed = churches.reduce((acc, c) => acc + (c.smsUnitsUsed || 0), 0);
-  const totalRemaining = churches.reduce((acc, c) => acc + (c.smsCredits || 0), 0);
-  const activeCount = churches.filter(c => c.smsStatus === 'ACTIVE').length;
+  const totalAllocated = (churches || []).reduce((acc, c) => acc + (c.smsAllocatedUnits || 0), 0);
+  const totalUsed = (churches || []).reduce((acc, c) => acc + (c.smsUnitsUsed || 0), 0);
+  const totalRemaining = (churches || []).reduce((acc, c) => acc + (c.smsCredits || 0), 0);
+  const activeCount = (churches || []).filter(c => c.smsStatus === 'ACTIVE').length;
 
   return (
     <div className="space-y-5 text-left">
@@ -413,14 +417,14 @@ export const SuperAdminChurchSmsManager: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {filteredChurches.length === 0 ? (
+                  {(filteredChurches || []).length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-slate-400">
                         No churches found matching your filters.
                       </td>
                     </tr>
                   ) : (
-                    filteredChurches.map(c => (
+                    (filteredChurches || []).map(c => (
                       <tr key={c.id} className="hover:bg-slate-50/70 transition">
                         <td className="py-3.5 px-4">
                           <div className="font-bold text-slate-900 text-sm">{c.name}</div>
@@ -556,14 +560,14 @@ export const SuperAdminChurchSmsManager: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {audits.length === 0 ? (
+                {(audits || []).length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-400">
                       No SMS unit adjustments recorded yet.
                     </td>
                   </tr>
                 ) : (
-                  audits.map(a => (
+                  (audits || []).map(a => (
                     <tr key={a.id} className="hover:bg-slate-50/70 transition">
                       <td className="py-3 px-4 font-mono text-[11px] text-slate-500 whitespace-nowrap">
                         {new Date(a.timestamp).toLocaleString('en-GB', {

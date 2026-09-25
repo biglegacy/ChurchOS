@@ -32,6 +32,7 @@ import { ApiClient } from '../api';
 import { Member, DepartmentOrGroup, Church } from '../types';
 import { normalizePhoneNumber, formatPhoneForDisplay } from '../utils/phoneUtils';
 import { useMembers } from '../context/MembersContext';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 interface Props {
   onRecordGivingForMember?: (memberId: string) => void;
@@ -114,6 +115,9 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(formError, setFormError, 2000);
+  useAutoDismissNotification(smsResult, setSmsResult, 2000);
 
   const loadMembers = async () => {
     try {
@@ -125,12 +129,12 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
       if (deptFilter) query.append('departmentId', deptFilter);
 
       const [mRes, dRes] = await Promise.all([
-        ApiClient.get(`/api/church/members?${query.toString()}`),
-        ApiClient.get('/api/church/departments'),
+        ApiClient.get(`/api/church/members?${query.toString()}`).catch(() => []),
+        ApiClient.get('/api/church/departments').catch(() => []),
       ]);
 
-      setMembers(mRes);
-      setDepartments(dRes);
+      setMembers(Array.isArray(mRes) ? mRes : []);
+      setDepartments(Array.isArray(dRes) ? dRes : []);
     } catch (err: any) {
       console.error(err);
     } finally {
@@ -552,7 +556,7 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
             className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-slate-700 bg-white focus:outline-none focus:border-teal-700"
           >
             <option value="">All Ministries / Departments</option>
-            {departments.map(d => (
+            {(departments || []).map(d => (
               <option key={d.id} value={d.id}>
                 {d.name}
               </option>
@@ -628,13 +632,13 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
 
         {loading ? (
           <div className="p-8 text-center text-xs text-slate-400">Loading directory...</div>
-        ) : members.length === 0 ? (
+        ) : (members || []).length === 0 ? (
           <div className="p-8 text-center text-xs text-slate-400">
             No matching member records found.
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {members.map(member => {
+            {(members || []).map(member => {
               const isSelected = selectedMemberIds.includes(member.id);
               const age = calculateAge(member.dateOfBirth);
 
@@ -1171,11 +1175,11 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
                   <h4 className="font-bold text-slate-800 mb-2">Service Attendance Log</h4>
                   {loadingDetail ? (
                     <p className="text-slate-400 py-4 text-center">Loading records...</p>
-                  ) : detailData?.attendanceHistory?.length === 0 ? (
+                  ) : (detailData?.attendanceHistory || []).length === 0 ? (
                     <p className="text-slate-400 py-4 text-center">No attendance recorded yet.</p>
                   ) : (
                     <div className="space-y-2">
-                      {detailData?.attendanceHistory?.map((att: any) => (
+                      {(detailData?.attendanceHistory || []).map((att: any) => (
                         <div
                           key={att.id}
                           className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between"
@@ -1205,11 +1209,11 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
                   <h4 className="font-bold text-slate-800 mb-2">Member Contributions Log</h4>
                   {loadingDetail ? (
                     <p className="text-slate-400 py-4 text-center">Loading records...</p>
-                  ) : detailData?.givingHistory?.length === 0 ? (
+                  ) : (detailData?.givingHistory || []).length === 0 ? (
                     <p className="text-slate-400 py-4 text-center">No giving recorded yet for this member.</p>
                   ) : (
                     <div className="space-y-2">
-                      {detailData?.givingHistory?.map((giv: any) => (
+                      {(detailData?.givingHistory || []).map((giv: any) => (
                         <div
                           key={giv.id}
                           className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between"

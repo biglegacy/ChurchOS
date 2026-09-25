@@ -120,7 +120,7 @@ export const UpcomingBirthdaysWidget: React.FC<Props> = ({
         if (data) {
           setData({
             ...data,
-            birthdays: data.birthdays.map(b => (b.isToday ? { ...b, alreadySentToday: true } : b)),
+            birthdays: (data.birthdays || []).map(b => (b.isToday ? { ...b, alreadySentToday: true } : b)),
           });
         }
         if (onRefresh) onRefresh();
@@ -140,7 +140,7 @@ export const UpcomingBirthdaysWidget: React.FC<Props> = ({
     }
   };
 
-  const birthdays = data?.birthdays || [];
+  const birthdays = Array.isArray(data?.birthdays) ? data.birthdays : [];
   const todayBirthdays = birthdays.filter(b => b.isToday);
   const pendingTodayCount = todayBirthdays.filter(b => !b.alreadySentToday).length;
 

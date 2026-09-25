@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../../api';
 import { SystemNotification } from '../../types';
+import { useAutoDismissNotification } from '../../utils/useAutoDismissNotification';
 
 export const SuperAdminNotifications: React.FC = () => {
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
@@ -23,13 +24,15 @@ export const SuperAdminNotifications: React.FC = () => {
   const [dispatching, setDispatching] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   const loadNotifications = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await ApiClient.get('/api/super-admin/notifications');
-      setNotifications(res);
+      setNotifications(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load system notifications.');
     } finally {
@@ -182,11 +185,11 @@ export const SuperAdminNotifications: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs lg:col-span-2 space-y-3">
           <h3 className="font-bold text-sm text-teal-950 flex items-center space-x-2">
             <Clock className="w-4 h-4 text-teal-700" />
-            <span>Dispatched Platform Notifications ({notifications.length})</span>
+            <span>Dispatched Platform Notifications ({(notifications || []).length})</span>
           </h3>
 
           <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-            {notifications.map(n => (
+            {(notifications || []).map(n => (
               <div key={n.id} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-900">{n.title}</span>

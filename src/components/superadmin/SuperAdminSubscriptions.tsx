@@ -45,7 +45,7 @@ export const SuperAdminSubscriptions: React.FC = () => {
       setLoading(true);
       setError(null);
       const res = await ApiClient.get('/api/super-admin/subscriptions');
-      setSubscriptions(res);
+      setSubscriptions(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load subscriptions.');
     } finally {
@@ -87,16 +87,17 @@ export const SuperAdminSubscriptions: React.FC = () => {
     }
   };
 
-  const activeCount = subscriptions.filter(s => s.status === 'ACTIVE').length;
-  const expiringCount = subscriptions.filter(s => s.status === 'EXPIRING').length;
-  const expiredCount = subscriptions.filter(s => s.status === 'EXPIRED').length;
-  const totalRevenue = subscriptions.reduce((acc, s) => acc + (s.priceGHS || 0), 0);
+  const activeCount = (subscriptions || []).filter(s => s.status === 'ACTIVE').length;
+  const expiringCount = (subscriptions || []).filter(s => s.status === 'EXPIRING').length;
+  const expiredCount = (subscriptions || []).filter(s => s.status === 'EXPIRED').length;
+  const totalRevenue = (subscriptions || []).reduce((acc, s) => acc + (s.priceGHS || 0), 0);
 
-  const filtered = subscriptions.filter(s => {
+  const filtered = (subscriptions || []).filter(s => {
+    const q = (searchTerm || '').toLowerCase();
     const matchesSearch =
-      s.churchName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.city.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.plan.toLowerCase().includes(searchTerm.toLowerCase());
+      (s.churchName || '').toLowerCase().includes(q) ||
+      (s.city || '').toLowerCase().includes(q) ||
+      (s.plan || '').toLowerCase().includes(q);
     const matchesStatus = statusFilter === 'ALL' || s.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -211,7 +212,7 @@ export const SuperAdminSubscriptions: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filtered.map(s => (
+              {(filtered || []).map(s => (
                 <tr key={s.churchId} className="hover:bg-slate-50/60 transition">
                   <td className="py-3 px-4">
                     <div className="font-bold text-slate-900">{s.churchName}</div>

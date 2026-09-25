@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../../api';
 import { PopupMessage } from '../../types';
+import { useAutoDismissNotification } from '../../utils/useAutoDismissNotification';
 
 export const SuperAdminPopupMessages: React.FC = () => {
   const [popups, setPopups] = useState<PopupMessage[]>([]);
@@ -25,13 +26,15 @@ export const SuperAdminPopupMessages: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   const loadPopups = async () => {
     try {
       setLoading(true);
       setError(null);
       const res = await ApiClient.get('/api/super-admin/popup-messages');
-      setPopups(res);
+      setPopups(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load in-app popup broadcasts.');
     } finally {
@@ -132,7 +135,7 @@ export const SuperAdminPopupMessages: React.FC = () => {
 
       {/* Popups Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {popups.map(p => (
+        {(popups || []).map(p => (
           <div
             key={p.id}
             className={`bg-white p-5 rounded-xl border shadow-xs space-y-3 transition ${

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { ChurchEvent } from '../types';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 interface Props {
   onNavigateTab?: (tab: string) => void;
@@ -76,13 +77,19 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
+
+  // In-app Delete Confirmation Modal
+  const [eventToDelete, setEventToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
       setLoading(true);
       const res = await ApiClient.get('/api/church/events');
-      setEvents(res || []);
+      setEvents(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load church events.');
     } finally {
@@ -167,25 +174,28 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
     }
   };
 
-  const handleDeleteEvent = async (eventId: string, title: string) => {
-    if (!window.confirm(`Are you sure you want to delete the event "${title}"?`)) {
-      return;
-    }
+  const handleDeleteEvent = (eventId: string, title: string) => {
+    setEventToDelete({ id: eventId, title });
+  };
+
+  const handleConfirmDeleteEvent = async () => {
+    if (!eventToDelete) return;
 
     try {
-      setDeletingId(eventId);
+      setIsDeletingEvent(true);
       setError(null);
-      await ApiClient.delete(`/api/church/events/${eventId}`);
-      setEvents(prev => prev.filter(e => e.id !== eventId));
-      setNotice(`Event "${title}" has been deleted.`);
+      await ApiClient.delete(`/api/church/events/${eventToDelete.id}`);
+      setEvents(prev => prev.filter(e => e.id !== eventToDelete.id));
+      setNotice(`Event "${eventToDelete.title}" has been deleted.`);
+      setEventToDelete(null);
     } catch (err: any) {
       setError(err.message || 'Failed to delete event.');
     } finally {
-      setDeletingId(null);
+      setIsDeletingEvent(false);
     }
   };
 
-  const filteredEvents = events.filter(evt => {
+  const filteredEvents = (events || []).filter(evt => {
     // Search query matching
     const query = searchQuery.toLowerCase();
     const matchesSearch =
@@ -215,7 +225,7 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
     return true;
   });
 
-  const customEventsCount = events.filter(
+  const customEventsCount = (events || []).filter(
     e => !!e.isCustom || !['Conference', 'Revival', 'Vigil', 'Retreat', 'Outreach', 'Ceremony'].includes(e.category)
   ).length;
 
@@ -353,7 +363,7 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredEvents.map(evt => {
+          {(filteredEvents || []).map(evt => {
             const isCustomEvent =
               evt.isCustom ||
               !['Conference', 'Revival', 'Vigil', 'Retreat', 'Outreach', 'Ceremony'].includes(evt.category);
@@ -729,6 +739,73 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* IN-APP DELETE EVENT CONFIRMATION MODAL                              */}
+      {/* =================================================================== */}
+      {eventToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden text-xs text-left animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-rose-950">Delete Church Event</h3>
+                  <p className="text-[11px] text-rose-600">Remove event from calendar & schedule</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEventToDelete(null)}
+                disabled={isDeletingEvent}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              <p className="text-slate-700 leading-relaxed text-xs">
+                Are you sure you want to delete the event <strong className="text-slate-900 font-bold">&quot;{eventToDelete.title}&quot;</strong>?
+              </p>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px]">
+                <strong>Warning:</strong> This will remove the event from the church calendar and cancel any scheduled reminders.
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setEventToDelete(null)}
+                disabled={isDeletingEvent}
+                className="px-4 py-2 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteEvent}
+                disabled={isDeletingEvent}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingEvent ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Yes, Delete Event</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

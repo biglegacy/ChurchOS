@@ -48,6 +48,7 @@ import { SuperAdminApiSettings } from './superadmin/SuperAdminApiSettings';
 import { SuperAdminAuditLogs } from './superadmin/SuperAdminAuditLogs';
 import { SuperAdminSystemSettings } from './superadmin/SuperAdminSystemSettings';
 import { SuperAdminChurchSmsManager } from './superadmin/SuperAdminChurchSmsManager';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 interface Props {
   activeTab: string;
@@ -64,6 +65,8 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
   const [platformSettings, setPlatformSettings] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  useAutoDismissNotification(error, setError, 2000);
+  useAutoDismissNotification(actionSuccess, setActionSuccess, 2000);
 
   // Modals / forms
   const [selectedChurch, setSelectedChurch] = useState<Church | null>(null);
@@ -112,10 +115,10 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
       ]);
 
       setDashboardData(dashRes);
-      setChurches(churchesRes);
+      setChurches(Array.isArray(churchesRes) ? churchesRes : []);
       setSmsBalanceInfo(balanceRes);
-      setSmsLogs(logsRes);
-      setAuditLogs(auditRes);
+      setSmsLogs(Array.isArray(logsRes) ? logsRes : []);
+      setAuditLogs(Array.isArray(auditRes) ? auditRes : []);
       setPlatformSettings(settingsRes);
       if (settingsRes?.apiKey) setApiKeyInput(settingsRes.apiKey);
       if (settingsRes?.defaultSenderId) setSenderIdInput(settingsRes.defaultSenderId);
@@ -314,12 +317,13 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
     );
   }
 
-  const filteredChurches = churches.filter(c => {
+  const filteredChurches = (churches || []).filter(c => {
+    const q = (churchSearch || '').toLowerCase();
     const matchesSearch =
-      c.name.toLowerCase().includes(churchSearch.toLowerCase()) ||
-      c.city.toLowerCase().includes(churchSearch.toLowerCase()) ||
-      c.adminEmail.toLowerCase().includes(churchSearch.toLowerCase()) ||
-      c.seniorPastor.toLowerCase().includes(churchSearch.toLowerCase());
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.city || '').toLowerCase().includes(q) ||
+      (c.adminEmail || '').toLowerCase().includes(q) ||
+      (c.seniorPastor || '').toLowerCase().includes(q);
     const matchesStatus = churchStatusFilter === 'ALL' || c.status === churchStatusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -435,7 +439,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ activeTab, onNavigateTab 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredChurches.map(c => (
+                  {(filteredChurches || []).map(c => (
                     <tr key={c.id} className="hover:bg-slate-50/60 transition">
                       <td className="py-3.5 px-4">
                         <div className="font-bold text-slate-900">{c.name}</div>

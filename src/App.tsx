@@ -137,6 +137,7 @@ export default function App() {
           onOpenDrawer={() => setDrawerOpen(true)}
           onLogout={handleLogout}
           onQuickAction={handleQuickAction}
+          onNavigateTab={tab => setActiveTab(tab)}
         />
 
         {/* Scrollable Page Body */}

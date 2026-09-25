@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { User as UserType } from '../types';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 interface Props {
   user: UserType;
@@ -31,6 +32,8 @@ export const MemberPortalView: React.FC<Props> = ({ user }) => {
   const [submittingPrayer, setSubmittingPrayer] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   const loadData = async () => {
     try {
@@ -83,9 +86,9 @@ export const MemberPortalView: React.FC<Props> = ({ user }) => {
 
   const member = portalData?.member || {};
   const church = portalData?.church || {};
-  const attendance = portalData?.attendance || [];
-  const giving = portalData?.giving || [];
-  const totalGiving = giving.reduce((sum: number, g: any) => sum + g.amount, 0);
+  const attendance = Array.isArray(portalData?.attendance) ? portalData.attendance : [];
+  const giving = Array.isArray(portalData?.giving) ? portalData.giving : [];
+  const totalGiving = (giving || []).reduce((sum: number, g: any) => sum + (g?.amount || 0), 0);
 
   return (
     <div className="space-y-5 pb-20 text-left max-w-3xl mx-auto">
@@ -210,10 +213,10 @@ export const MemberPortalView: React.FC<Props> = ({ user }) => {
             My Service Attendance History
           </div>
           <div className="divide-y divide-slate-100">
-            {attendance.length === 0 ? (
+            {(attendance || []).length === 0 ? (
               <p className="p-8 text-center text-xs text-slate-400">No attendance records logged.</p>
             ) : (
-              attendance.map((att: any) => (
+              (attendance || []).map((att: any) => (
                 <div key={att.id} className="p-4 flex items-center justify-between text-xs hover:bg-slate-50">
                   <div>
                     <span className="font-bold text-slate-900">{att.serviceName}</span>
@@ -253,10 +256,10 @@ export const MemberPortalView: React.FC<Props> = ({ user }) => {
               Contribution Receipts History
             </div>
             <div className="divide-y divide-slate-100">
-              {giving.length === 0 ? (
+              {(giving || []).length === 0 ? (
                 <p className="p-8 text-center text-xs text-slate-400">No giving records found.</p>
               ) : (
-                giving.map((g: any) => (
+                (giving || []).map((g: any) => (
                   <div key={g.id} className="p-4 flex items-center justify-between text-xs hover:bg-slate-50">
                     <div>
                       <div className="flex items-center space-x-2">

@@ -34,7 +34,7 @@ export const SuperAdminPricing: React.FC = () => {
       setLoading(true);
       setError(null);
       const res = await ApiClient.get('/api/super-admin/pricing');
-      setPlans(res);
+      setPlans(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load pricing plans.');
     } finally {
@@ -127,7 +127,7 @@ export const SuperAdminPricing: React.FC = () => {
 
       {/* Pricing Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {plans.map(plan => (
+        {(plans || []).map(plan => (
           <div
             key={plan.id}
             className={`bg-white rounded-xl border p-5 flex flex-col justify-between relative shadow-xs transition ${
@@ -168,7 +168,7 @@ export const SuperAdminPricing: React.FC = () => {
 
               <div className="mt-4 space-y-1.5">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Included Features</p>
-                {plan.features?.map((feat, idx) => (
+                {(plan.features || []).map((feat, idx) => (
                   <div key={idx} className="flex items-center space-x-2 text-xs text-slate-700">
                     <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span>{feat}</span>

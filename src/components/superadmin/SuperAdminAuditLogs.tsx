@@ -22,7 +22,7 @@ export const SuperAdminAuditLogs: React.FC = () => {
       setLoading(true);
       setError(null);
       const res = await ApiClient.get('/api/super-admin/audit-logs');
-      setLogs(res);
+      setLogs(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load platform audit logs.');
     } finally {
@@ -34,12 +34,15 @@ export const SuperAdminAuditLogs: React.FC = () => {
     loadLogs();
   }, []);
 
-  const filteredLogs = logs.filter(l =>
-    l.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    l.details.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    l.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (l.churchId && l.churchId.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredLogs = (logs || []).filter(l => {
+    const q = (searchTerm || '').toLowerCase();
+    return (
+      (l.action || '').toLowerCase().includes(q) ||
+      (l.details || '').toLowerCase().includes(q) ||
+      (l.userName || '').toLowerCase().includes(q) ||
+      (l.churchId && l.churchId.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <div className="space-y-5 text-left">
@@ -100,7 +103,7 @@ export const SuperAdminAuditLogs: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredLogs.map(l => (
+              {(filteredLogs || []).map(l => (
                 <tr key={l.id} className="hover:bg-slate-50/60 transition">
                   <td className="py-2.5 px-4 font-mono text-[11px] text-slate-500 whitespace-nowrap">
                     {new Date(l.timestamp).toLocaleString()}

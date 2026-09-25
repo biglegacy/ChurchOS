@@ -28,7 +28,7 @@ export const SuperAdminSmsDelivery: React.FC = () => {
         ApiClient.get('/api/super-admin/sms/logs'),
       ]);
       setStats(statsRes);
-      setLogs(logsRes);
+      setLogs(Array.isArray(logsRes) ? logsRes : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load SMS delivery metrics.');
     } finally {
@@ -40,12 +40,13 @@ export const SuperAdminSmsDelivery: React.FC = () => {
     loadData();
   }, []);
 
-  const filteredLogs = logs.filter(l => {
+  const filteredLogs = (logs || []).filter(l => {
+    const q = (searchTerm || '').toLowerCase();
     const matchesSearch =
-      (l.churchName && l.churchName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (l.recipientName && l.recipientName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (l.churchName && l.churchName.toLowerCase().includes(q)) ||
+      (l.recipientName && l.recipientName.toLowerCase().includes(q)) ||
       (l.normalizedPhone && l.normalizedPhone.includes(searchTerm)) ||
-      (l.message && l.message.toLowerCase().includes(searchTerm.toLowerCase()));
+      (l.message && l.message.toLowerCase().includes(q));
 
     const matchesStatus = statusFilter === 'ALL' || l.status === statusFilter;
 
@@ -154,7 +155,7 @@ export const SuperAdminSmsDelivery: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredLogs.map(s => (
+              {(filteredLogs || []).map(s => (
                 <tr key={s.id} className="hover:bg-slate-50/60 transition">
                   <td className="py-2.5 px-4 font-semibold text-slate-800">{s.churchName || s.churchId}</td>
                   <td className="py-2.5 px-4 text-slate-700">{s.recipientName}</td>

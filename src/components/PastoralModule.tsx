@@ -16,6 +16,7 @@ import { ApiClient } from '../api';
 import { PastoralCareCase, Member } from '../types';
 import { useMembers } from '../context/MembersContext';
 import { MemberSelector } from './common/MemberSelector';
+import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 export const PastoralModule: React.FC = () => {
   const { members } = useMembers();
@@ -23,13 +24,42 @@ export const PastoralModule: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedCase, setSelectedCase] = useState<PastoralCareCase | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Custom category support
+  const [categoriesData, setCategoriesData] = useState<{
+    standardCategories: string[];
+    customCategories: string[];
+    allCategories: string[];
+  }>({
+    standardCategories: [
+      'Pastoral Counseling',
+      'Hospital Visitation',
+      'Bereavement Support',
+      'Marital Counseling',
+      'Baby Dedication',
+      'Welfare Need',
+    ],
+    customCategories: [],
+    allCategories: [
+      'Pastoral Counseling',
+      'Hospital Visitation',
+      'Bereavement Support',
+      'Marital Counseling',
+      'Baby Dedication',
+      'Welfare Need',
+    ],
+  });
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [customCategoryInput, setCustomCategoryInput] = useState('');
 
   // New Case Form
   const [formData, setFormData] = useState({
     memberId: '',
     memberName: '',
     phone: '',
-    caseType: 'Pastoral Counseling' as const,
+    caseType: 'Pastoral Counseling' as any,
     urgencyLevel: 'Medium' as const,
     pastorAssigned: 'Senior Pastor',
     summary: '',
@@ -39,12 +69,24 @@ export const PastoralModule: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useAutoDismissNotification(notice, setNotice, 2000);
+  useAutoDismissNotification(error, setError, 2000);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const cRes = await ApiClient.get('/api/church/pastoral-care');
-      setCases(cRes);
+      const [cRes, catRes] = await Promise.all([
+        ApiClient.get('/api/church/pastoral').catch(() => []),
+        ApiClient.get('/api/church/pastoral-categories').catch(() => null),
+      ]);
+      setCases(Array.isArray(cRes) ? cRes : []);
+      if (catRes) {
+        setCategoriesData(prev => ({
+          standardCategories: Array.isArray(catRes.standardCategories) ? catRes.standardCategories : prev.standardCategories,
+          customCategories: Array.isArray(catRes.customCategories) ? catRes.customCategories : prev.customCategories,
+          allCategories: Array.isArray(catRes.allCategories) ? catRes.allCategories : prev.allCategories,
+        }));
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load pastoral care.');
     } finally {
@@ -76,6 +118,12 @@ export const PastoralModule: React.FC = () => {
 
   const handleCreateCase = async (e: React.FormEvent) => {
     e.preventDefault();
+    const actualCaseType = isCustomCategory ? customCategoryInput.trim() : formData.caseType;
+
+    if (!actualCaseType) {
+      setError('Please provide a care category.');
+      return;
+    }
     if (!formData.memberName || !formData.summary) {
       setError('Please provide member name and case summary.');
       return;
@@ -84,9 +132,26 @@ export const PastoralModule: React.FC = () => {
     try {
       setSaving(true);
       setError(null);
-      await ApiClient.post('/api/church/pastoral-care', formData);
+      await ApiClient.post('/api/church/pastoral', {
+        ...formData,
+        caseType: actualCaseType,
+        customCaseType: isCustomCategory ? actualCaseType : undefined,
+        isCustom: isCustomCategory,
+      });
       setNotice(`Confidential pastoral record created for ${formData.memberName}.`);
       setShowAddModal(false);
+      setIsCustomCategory(false);
+      setCustomCategoryInput('');
+      setFormData({
+        memberId: '',
+        memberName: '',
+        phone: '',
+        caseType: 'Pastoral Counseling',
+        urgencyLevel: 'Medium',
+        pastorAssigned: 'Senior Pastor',
+        summary: '',
+        counselingNotes: '',
+      });
       await loadData();
     } catch (err: any) {
       setError(err.message);
@@ -97,7 +162,7 @@ export const PastoralModule: React.FC = () => {
 
   const handleUpdateStatus = async (id: string, status: string) => {
     try {
-      await ApiClient.put(`/api/church/pastoral-care/${id}`, { status });
+      await ApiClient.put(`/api/church/pastoral/${id}`, { status });
       setNotice(`Updated status to ${status}.`);
       await loadData();
       if (selectedCase?.id === id) {
@@ -157,60 +222,126 @@ export const PastoralModule: React.FC = () => {
 
       {/* Case List */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="px-5 py-3 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between text-xs">
-          <span className="font-bold text-teal-950">Active Pastoral Cases ({cases.length})</span>
+        <div className="p-3.5 border-b border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
+          <div className="flex items-center space-x-2 w-full sm:w-auto">
+            <span className="font-bold text-teal-950 shrink-0">Pastoral Care Cases ({(cases || []).length})</span>
+            {(categoriesData?.customCategories || []).length > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700">
+                {(categoriesData?.customCategories || []).length} custom categories
+              </span>
+            )}
+          </div>
+          <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+            <div className="relative flex-1 sm:w-48">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search member, notes..."
+                className="w-full pl-8 pr-2.5 py-1 text-xs border border-slate-300 rounded-md bg-white focus:outline-none focus:border-teal-700"
+              />
+            </div>
+            <select
+              value={categoryFilter}
+              onChange={e => setCategoryFilter(e.target.value)}
+              className="px-2.5 py-1 text-xs border border-slate-300 rounded-md bg-white text-slate-700 font-medium"
+            >
+              <option value="ALL">All Categories</option>
+              <optgroup label="Standard Categories">
+                {(categoriesData?.standardCategories || []).map(sc => (
+                  <option key={sc} value={sc}>{sc}</option>
+                ))}
+              </optgroup>
+              {(categoriesData?.customCategories || []).length > 0 && (
+                <optgroup label="Custom Categories">
+                  {(categoriesData?.customCategories || []).map(cc => (
+                    <option key={cc} value={cc}>★ {cc}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
         </div>
         <div className="divide-y divide-slate-100">
-          {cases.length === 0 ? (
+          {cases
+            .filter(c => {
+              const matchesSearch =
+                (c.memberName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (c.summary || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (c.caseType || '').toLowerCase().includes(searchQuery.toLowerCase());
+              const matchesCat =
+                categoryFilter === 'ALL' || (c.caseType || '').toLowerCase() === categoryFilter.toLowerCase();
+              return matchesSearch && matchesCat;
+            }).length === 0 ? (
             <p className="p-8 text-center text-xs text-slate-400">No pastoral cases recorded.</p>
           ) : (
-            cases.map(item => (
-              <div
-                key={item.id}
-                className="p-4 sm:p-5 hover:bg-slate-50/60 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs cursor-pointer"
-                onClick={() => setSelectedCase(item)}
-              >
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold text-slate-900 text-sm">{item.memberName}</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-800 border border-teal-200">
-                      {item.caseType}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        item.urgencyLevel === 'Critical'
-                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                          : item.urgencyLevel === 'High'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : 'bg-slate-100 text-slate-700'
-                      }`}
-                    >
-                      {item.urgencyLevel} Priority
-                    </span>
-                  </div>
-                  <p className="text-slate-600 mt-1 line-clamp-1">{item.summary}</p>
-                  <div className="flex items-center space-x-3 text-[11px] text-slate-400 mt-1">
-                    <span>Assigned: {item.pastorAssigned}</span>
-                    <span>•</span>
-                    <span>Date: {item.openedDate}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-2 shrink-0">
-                  <span
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${
-                      item.status === 'Open'
-                        ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                        : item.status === 'In Progress'
-                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    }`}
+            cases
+              .filter(c => {
+                const matchesSearch =
+                  (c.memberName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  (c.summary || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  (c.caseType || '').toLowerCase().includes(searchQuery.toLowerCase());
+                const matchesCat =
+                  categoryFilter === 'ALL' || (c.caseType || '').toLowerCase() === categoryFilter.toLowerCase();
+                return matchesSearch && matchesCat;
+              })
+              .map(item => {
+                const isCustom =
+                  item.isCustom || categoriesData.customCategories.includes(item.caseType);
+                return (
+                  <div
+                    key={item.id}
+                    className="p-4 sm:p-5 hover:bg-slate-50/60 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs cursor-pointer"
+                    onClick={() => setSelectedCase(item)}
                   >
-                    {item.status}
-                  </span>
-                </div>
-              </div>
-            ))
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-slate-900 text-sm">{item.memberName}</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-50 text-teal-800 border border-teal-200">
+                          {item.caseType}
+                        </span>
+                        {isCustom && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-700">
+                            Custom
+                          </span>
+                        )}
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            item.urgencyLevel === 'Critical'
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : item.urgencyLevel === 'High'
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {item.urgencyLevel} Priority
+                        </span>
+                      </div>
+                      <p className="text-slate-600 mt-1 line-clamp-1">{item.summary}</p>
+                      <div className="flex items-center space-x-3 text-[11px] text-slate-400 mt-1">
+                        <span>Assigned: {item.pastorAssigned}</span>
+                        <span>•</span>
+                        <span>Date: {item.openedDate}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-2 shrink-0">
+                      <span
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${
+                          item.status === 'Open'
+                            ? 'bg-teal-50 text-teal-700 border border-teal-200'
+                            : item.status === 'In Progress'
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        }`}
+                      >
+                        {item.status}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
           )}
         </div>
       </div>
@@ -343,35 +474,106 @@ export const PastoralModule: React.FC = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Care Category</label>
-                  <select
-                    value={formData.caseType}
-                    onChange={e => setFormData({ ...formData, caseType: e.target.value as any })}
-                    className="w-full px-2.5 py-2 border border-slate-200 rounded-md bg-white focus:outline-none focus:border-teal-700"
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-semibold text-slate-700">Care Category *</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomCategory(!isCustomCategory);
+                      if (!isCustomCategory && !customCategoryInput) {
+                        setCustomCategoryInput('');
+                      }
+                    }}
+                    className="text-[11px] font-bold text-teal-700 hover:text-teal-900 underline"
                   >
-                    <option value="Pastoral Counseling">Pastoral Counseling</option>
-                    <option value="Hospital Visitation">Hospital Visitation</option>
-                    <option value="Bereavement Support">Bereavement Support</option>
-                    <option value="Marital Counseling">Marital Counseling</option>
-                    <option value="Baby Dedication">Baby Dedication</option>
-                    <option value="Welfare Need">Welfare Need</option>
-                  </select>
+                    {isCustomCategory ? '← Choose Standard' : '+ Custom Category'}
+                  </button>
                 </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Urgency</label>
-                  <select
-                    value={formData.urgencyLevel}
-                    onChange={e => setFormData({ ...formData, urgencyLevel: e.target.value as any })}
-                    className="w-full px-2.5 py-2 border border-slate-200 rounded-md bg-white focus:outline-none focus:border-teal-700"
-                  >
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                    <option value="Critical">Critical</option>
-                  </select>
-                </div>
+
+                {isCustomCategory ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      required
+                      value={customCategoryInput}
+                      onChange={e => setCustomCategoryInput(e.target.value)}
+                      placeholder="e.g. Pre-Marital Counseling, Youth Mentorship, Crisis Support"
+                      className="w-full px-3 py-2 border border-purple-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 bg-purple-50/20"
+                    />
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {[
+                        'Youth Mentorship',
+                        'Pre-Marital Counseling',
+                        'Deliverance Session',
+                        'Crisis Support',
+                        'Prison Outreach',
+                        'Elderly Care',
+                        'Spiritual Direction',
+                      ].map(pill => (
+                        <button
+                          key={pill}
+                          type="button"
+                          onClick={() => setCustomCategoryInput(pill)}
+                          className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 hover:bg-teal-50 hover:text-teal-800 text-slate-700 border border-slate-200 transition-colors"
+                        >
+                          + {pill}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <select
+                        value={formData.caseType}
+                        onChange={e => setFormData({ ...formData, caseType: e.target.value as any })}
+                        className="w-full px-2.5 py-2 border border-slate-200 rounded-md bg-white focus:outline-none focus:border-teal-700"
+                      >
+                        <optgroup label="Standard Categories">
+                          {(categoriesData?.standardCategories || []).map(sc => (
+                            <option key={sc} value={sc}>{sc}</option>
+                          ))}
+                        </optgroup>
+                        {(categoriesData?.customCategories || []).length > 0 && (
+                          <optgroup label="Custom Categories">
+                            {(categoriesData?.customCategories || []).map(cc => (
+                              <option key={cc} value={cc}>★ {cc}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    </div>
+                    <div>
+                      <select
+                        value={formData.urgencyLevel}
+                        onChange={e => setFormData({ ...formData, urgencyLevel: e.target.value as any })}
+                        className="w-full px-2.5 py-2 border border-slate-200 rounded-md bg-white focus:outline-none focus:border-teal-700"
+                      >
+                        <option value="Low">Low Urgency</option>
+                        <option value="Medium">Medium Urgency</option>
+                        <option value="High">High Urgency</option>
+                        <option value="Critical">Critical Urgency</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {isCustomCategory && (
+                  <div className="mt-3">
+                    <label className="block font-semibold text-slate-700 mb-1">Urgency</label>
+                    <select
+                      value={formData.urgencyLevel}
+                      onChange={e => setFormData({ ...formData, urgencyLevel: e.target.value as any })}
+                      className="w-full px-2.5 py-2 border border-slate-200 rounded-md bg-white focus:outline-none focus:border-teal-700"
+                    >
+                      <option value="Low">Low Urgency</option>
+                      <option value="Medium">Medium Urgency</option>
+                      <option value="High">High Urgency</option>
+                      <option value="Critical">Critical Urgency</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div>

@@ -44,14 +44,14 @@ export const SuperAdminOverview: React.FC<Props> = ({
   onApproveChurch,
 }) => {
   const kpis = dashboardData?.kpis || {};
-  const pendingChurches = churches.filter(c => c.status === 'PENDING');
-  const activeChurches = churches.filter(c => c.status === 'ACTIVE');
-  const suspendedChurches = churches.filter(c => c.status === 'SUSPENDED');
+  const pendingChurches = (churches || []).filter(c => c.status === 'PENDING');
+  const activeChurches = (churches || []).filter(c => c.status === 'ACTIVE');
+  const suspendedChurches = (churches || []).filter(c => c.status === 'SUSPENDED');
 
   // Subscriptions breakdown
-  const activeSubs = churches.filter(c => c.subscription?.status === 'ACTIVE').length;
-  const expiringSubs = churches.filter(c => c.subscription?.status === 'EXPIRING').length;
-  const expiredSubs = churches.filter(c => c.subscription?.status === 'EXPIRED').length;
+  const activeSubs = (churches || []).filter(c => c.subscription?.status === 'ACTIVE').length;
+  const expiringSubs = (churches || []).filter(c => c.subscription?.status === 'EXPIRING').length;
+  const expiredSubs = (churches || []).filter(c => c.subscription?.status === 'EXPIRED').length;
 
   return (
     <div className="space-y-6 text-left">
@@ -253,13 +253,13 @@ export const SuperAdminOverview: React.FC<Props> = ({
               onClick={() => onNavigateTab('sa-churches')}
               className="text-xs text-teal-700 hover:text-teal-900 font-semibold flex items-center space-x-0.5"
             >
-              <span>View All ({churches.length})</span>
+              <span>View All ({(churches || []).length})</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
           <div className="space-y-2.5">
-            {churches.slice(0, 5).map(c => (
+            {(churches || []).slice(0, 5).map(c => (
               <div
                 key={c.id}
                 className="p-3 bg-slate-50 rounded-lg border border-slate-100 flex items-center justify-between text-xs"
@@ -313,7 +313,7 @@ export const SuperAdminOverview: React.FC<Props> = ({
           </div>
 
           <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-            {auditLogs.slice(0, 6).map(log => (
+            {(auditLogs || []).slice(0, 6).map(log => (
               <div key={log.id} className="p-2.5 bg-slate-50 rounded-lg border border-slate-100 text-xs">
                 <div className="flex items-center justify-between text-[11px] mb-1">
                   <span className="font-bold text-slate-800">{log.action}</span>
