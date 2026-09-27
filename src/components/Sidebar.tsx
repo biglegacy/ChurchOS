@@ -26,6 +26,7 @@ import {
   Megaphone,
   Code,
   ShieldCheck,
+  ListTodo,
 } from 'lucide-react';
 import { User, Church, hasPermission, ChurchPermission } from '../types';
 
@@ -57,6 +58,7 @@ export const Sidebar: React.FC<Props> = ({
     { id: 'pastoral', label: 'Pastoral Care', icon: HeartHandshake, perm: 'manage_pastoral' },
     { id: 'departments', label: 'Departments & Cells', icon: Network, perm: 'manage_departments' },
     { id: 'events', label: 'Events & Calendar', icon: Calendar, perm: 'manage_events' },
+    { id: 'tasks', label: 'Ministry Tasks', icon: ListTodo, perm: 'manage_tasks' },
     { id: 'staff', label: 'Staff & Roles', icon: ShieldCheck, perm: 'manage_staff' },
     { id: 'settings', label: 'Settings', icon: Settings, perm: 'manage_settings' },
   ];

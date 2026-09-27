@@ -29,14 +29,19 @@ export interface User {
     | 'ASSISTANT_PASTOR'
     | 'PASTOR_MINISTER'
     | 'ACCOUNTANT'
+    | 'ATTENDANCE_OFFICER'
+    | 'MEMBER_MANAGER'
+    | 'SMS_MANAGER'
     | 'TREASURER'
     | 'FINANCE_OFFICER'
     | 'SECRETARY'
+    | 'EVENT_COORDINATOR'
     | 'DEPARTMENT_LEADER'
     | 'GROUP_LEADER'
     | 'CUSTOM'
     | 'MEMBER'
     | string;
+  roles?: string[]; // Multiple assigned roles
   customRoleTitle?: string;
   permissions?: string[];
   churchId?: string; // null for SUPER_ADMIN
@@ -53,19 +58,23 @@ export interface User {
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: ['*'],
-  CHURCH_OWNER: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
-  CHURCH_ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
-  ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
+  CHURCH_OWNER: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
+  CHURCH_ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
+  ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
   ACCOUNTANT: ['dashboard', 'giving', 'expenses'],
   TREASURER: ['dashboard', 'giving', 'expenses'],
   FINANCE_OFFICER: ['dashboard', 'giving', 'expenses'],
-  PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
+  ATTENDANCE_OFFICER: ['dashboard', 'attendance'],
+  MEMBER_MANAGER: ['dashboard', 'members'],
+  SMS_MANAGER: ['dashboard', 'sms'],
+  PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
   SENIOR_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
-  ASSISTANT_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
-  PASTOR_MINISTER: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
-  SECRETARY: ['dashboard', 'members', 'attendance', 'visitors', 'events', 'sms', 'departments'],
-  DEPARTMENT_LEADER: ['dashboard', 'members', 'attendance', 'departments', 'events'],
-  GROUP_LEADER: ['dashboard', 'members', 'attendance', 'departments', 'events'],
+  ASSISTANT_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
+  PASTOR_MINISTER: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
+  SECRETARY: ['dashboard', 'members', 'attendance', 'visitors', 'events', 'sms'],
+  EVENT_COORDINATOR: ['dashboard', 'events', 'tasks'],
+  DEPARTMENT_LEADER: ['dashboard', 'departments', 'attendance', 'events'],
+  GROUP_LEADER: ['dashboard', 'departments', 'attendance', 'events'],
   MEMBER: ['portal'],
   CUSTOM: ['dashboard'],
 };
@@ -573,6 +582,41 @@ export interface SystemNotification {
   createdAt: string;
 }
 
+export type MinistryTaskCategory =
+  | 'Pastoral Follow-up'
+  | 'Event Setup'
+  | 'Visitation'
+  | 'Administration'
+  | 'Finance Audit'
+  | 'Media & Sound'
+  | 'Welfare & Outreach'
+  | 'General'
+  | string;
+
+export type MinistryTaskPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
+export type MinistryTaskStatus = 'Pending' | 'In Progress' | 'Completed' | 'Cancelled';
+
+export interface MinistryTask {
+  id: string;
+  churchId: string;
+  title: string;
+  description?: string;
+  category: MinistryTaskCategory;
+  assignedToName?: string;
+  assignedToRole?: string;
+  assignedMemberId?: string;
+  departmentId?: string;
+  departmentName?: string;
+  priority: MinistryTaskPriority;
+  dueDate: string;
+  status: MinistryTaskStatus;
+  cancelledReason?: string;
+  completedAt?: string;
+  completedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface DatabaseSchema {
   users: User[];
   churches: Church[];
@@ -588,6 +632,7 @@ export interface DatabaseSchema {
   pastoralCases: PastoralCase[];
   departments: DepartmentOrGroup[];
   events: ChurchEvent[];
+  tasks: MinistryTask[];
   smsMessages: SmsMessage[];
   auditLogs: AuditLog[];
   platformSettings: CentralPlatformSettings;
@@ -691,31 +736,6 @@ export function getInitialDb(): DatabaseSchema {
     },
   ];
 
-  const seedPopupMessages: PopupMessage[] = [
-    {
-      id: 'pop_001',
-      title: 'Scheduled System Maintenance',
-      message: 'Church-OS Central Gateway routine network optimization will occur this Sunday from 23:00 to 23:30 GMT.',
-      type: 'INFO',
-      targetAudience: 'ALL',
-      active: true,
-      createdAt: now,
-      createdBy: 'Super Administrator',
-    },
-  ];
-
-  const seedSystemNotifications: SystemNotification[] = [
-    {
-      id: 'notif_001',
-      title: 'Central SMS Gateway Operational',
-      message: 'Direct telecom interconnect is online and performing with zero queuing delay.',
-      severity: 'low',
-      category: 'SMS',
-      isRead: false,
-      createdAt: now,
-    },
-  ];
-
   return {
     users: [superAdminUser],
     churches: [],
@@ -731,6 +751,7 @@ export function getInitialDb(): DatabaseSchema {
     pastoralCases: [],
     departments: [],
     events: [],
+    tasks: [],
     smsMessages: [],
     auditLogs: [],
     platformSettings: seedPlatformSettings,
@@ -756,6 +777,7 @@ const COLLECTION_KEYS: Array<keyof Omit<DatabaseSchema, 'platformSettings'>> = [
   'pastoralCases',
   'departments',
   'events',
+  'tasks',
   'smsMessages',
   'auditLogs',
   'pricingPlans',

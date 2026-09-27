@@ -15,6 +15,7 @@ import { VisitorsModule } from './components/VisitorsModule';
 import { PastoralModule } from './components/PastoralModule';
 import { DepartmentsModule } from './components/DepartmentsModule';
 import { EventsModule } from './components/EventsModule';
+import { TasksModule } from './components/TasksModule';
 import { SmsModule } from './components/SmsModule';
 import { ChurchSettingsModule } from './components/ChurchSettingsModule';
 import { MemberPortalView } from './components/MemberPortalView';
@@ -196,6 +197,10 @@ export default function App() {
 
                 {activeTab === 'events' && (
                   <EventsModule onNavigateTab={tab => setActiveTab(tab)} />
+                )}
+
+                {activeTab === 'tasks' && (
+                  <TasksModule />
                 )}
 
                 {activeTab === 'sms' && (

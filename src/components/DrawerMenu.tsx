@@ -27,6 +27,7 @@ import {
   Megaphone,
   Code,
   ShieldCheck,
+  ListTodo,
 } from 'lucide-react';
 import { User, Church, hasPermission, ChurchPermission } from '../types';
 
@@ -75,6 +76,7 @@ export const DrawerMenu: React.FC<Props> = ({
       items: [
         { id: 'departments', label: 'Departments & Groups', icon: Network, perm: 'manage_departments' as ChurchPermission },
         { id: 'events', label: 'Events & Calendar', icon: Calendar, perm: 'manage_events' as ChurchPermission },
+        { id: 'tasks', label: 'Ministry Tasks & Action Items', icon: ListTodo, perm: 'manage_tasks' as ChurchPermission },
       ],
     },
     {

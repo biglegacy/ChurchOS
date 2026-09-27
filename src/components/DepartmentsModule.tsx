@@ -126,6 +126,22 @@ export const DepartmentsModule: React.FC = () => {
     }
   };
 
+  const handleConfirmDeleteDepartment = async () => {
+    if (!departmentToDelete) return;
+    try {
+      setIsDeletingDepartment(true);
+      setError(null);
+      await ApiClient.delete(`/api/church/departments/${departmentToDelete.id}`);
+      setNotice(`"${departmentToDelete.name}" removed successfully.`);
+      setDepartments(prev => prev.filter(d => d.id !== departmentToDelete.id));
+      setDepartmentToDelete(null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete unit.');
+    } finally {
+      setIsDeletingDepartment(false);
+    }
+  };
+
   const filteredDepts = (departments || []).filter(dept => {
     const matchesSearch =
       (dept.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||

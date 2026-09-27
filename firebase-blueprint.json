@@ -74,6 +74,25 @@
         "balanceCredits": { "type": "number", "description": "Current SMS balance" },
         "connectionStatus": { "type": "string", "description": "Connection health" }
       }
+    },
+    "MinistryTask": {
+      "title": "MinistryTask",
+      "description": "Church ministry task, action item, or pastoral follow-up item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique task ID" },
+        "churchId": { "type": "string", "description": "Associated Church tenant ID" },
+        "title": { "type": "string", "description": "Task title or objective" },
+        "description": { "type": "string", "description": "Detailed notes or requirements" },
+        "category": { "type": "string", "description": "Task category" },
+        "assignedToName": { "type": "string", "description": "Assigned staff or member name" },
+        "priority": { "type": "string", "enum": ["Urgent", "High", "Medium", "Low"] },
+        "dueDate": { "type": "string", "description": "Target completion date" },
+        "status": { "type": "string", "enum": ["Pending", "In Progress", "Completed", "Cancelled"] },
+        "completedAt": { "type": "string", "description": "Completion ISO timestamp" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "churchId", "title", "priority", "status"]
     }
   },
   "firestore": {
@@ -84,6 +103,10 @@
     "/users/{userId}": {
       "schema": "User",
       "description": "Platform and church user accounts"
+    },
+    "/tasks/{taskId}": {
+      "schema": "MinistryTask",
+      "description": "Ministry tasks and operational action items"
     },
     "/smsMessages/{smsId}": {
       "schema": "SmsMessage",

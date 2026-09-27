@@ -21,6 +21,23 @@ async function startServer() {
   const PORT = 3000;
   const httpServer = http.createServer(app);
 
+  // Trust reverse proxies (Cloudflare, Cloud Run, load balancers)
+  app.set('trust proxy', 1);
+
+  // Cross-Origin Resource Sharing (CORS) & Preflight Handling for Cloudflare & Multi-Host
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Baggage, Sentry-Trace');
+    res.header('Access-Control-Allow-Credentials', 'true');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   // JSON Body Parser
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));

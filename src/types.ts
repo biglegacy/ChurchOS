@@ -21,6 +21,7 @@ export interface User {
     | 'CUSTOM'
     | 'MEMBER'
     | string;
+  roles?: string[]; // Multiple assigned roles
   customRoleTitle?: string;
   permissions?: string[];
   churchId?: string;
@@ -36,19 +37,23 @@ export interface User {
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: ['*'],
-  CHURCH_OWNER: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
-  CHURCH_ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
-  ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'staff', 'settings'],
+  CHURCH_OWNER: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
+  CHURCH_ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
+  ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
   ACCOUNTANT: ['dashboard', 'giving', 'expenses'],
   TREASURER: ['dashboard', 'giving', 'expenses'],
   FINANCE_OFFICER: ['dashboard', 'giving', 'expenses'],
-  PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
-  SENIOR_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
-  ASSISTANT_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
-  PASTOR_MINISTER: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
-  SECRETARY: ['dashboard', 'members', 'attendance', 'visitors', 'events', 'sms', 'departments'],
-  DEPARTMENT_LEADER: ['dashboard', 'members', 'attendance', 'departments', 'events'],
-  GROUP_LEADER: ['dashboard', 'members', 'attendance', 'departments', 'events'],
+  ATTENDANCE_OFFICER: ['dashboard', 'attendance'],
+  MEMBER_MANAGER: ['dashboard', 'members'],
+  SMS_MANAGER: ['dashboard', 'sms'],
+  PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
+  SENIOR_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms', 'tasks'],
+  ASSISTANT_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
+  PASTOR_MINISTER: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
+  SECRETARY: ['dashboard', 'members', 'attendance', 'visitors', 'events', 'sms'],
+  EVENT_COORDINATOR: ['dashboard', 'events', 'tasks'],
+  DEPARTMENT_LEADER: ['dashboard', 'departments', 'attendance', 'events'],
+  GROUP_LEADER: ['dashboard', 'departments', 'attendance', 'events'],
   MEMBER: ['portal'],
   CUSTOM: ['dashboard'],
 };
@@ -67,17 +72,23 @@ export type ChurchPermission =
   | 'manage_pastoral'
   | 'manage_departments'
   | 'manage_events'
+  | 'manage_tasks'
   | 'manage_staff'
   | 'manage_settings'
   | 'view_reports';
 
 export type ChurchStaffRole =
   | 'ACCOUNTANT'
+  | 'ATTENDANCE_OFFICER'
+  | 'MEMBER_MANAGER'
+  | 'SMS_MANAGER'
   | 'PASTOR'
   | 'ASSISTANT_PASTOR'
   | 'TREASURER'
   | 'SECRETARY'
   | 'FINANCE_OFFICER'
+  | 'EVENT_COORDINATOR'
+  | 'DEPARTMENT_LEADER'
   | 'ADMINISTRATOR'
   | 'CUSTOM';
 
@@ -91,30 +102,55 @@ export const ALL_CHURCH_PERMISSIONS: ChurchPermission[] = [
   'manage_pastoral',
   'manage_departments',
   'manage_events',
+  'manage_tasks',
   'manage_staff',
   'manage_settings',
   'view_reports',
 ];
 
+// Helper to calculate exact union of permissions from selected roles
+export function getCombinedPermissionsForRoles(roles: string[]): string[] {
+  if (!roles || roles.length === 0) return ['dashboard'];
+  const combined = new Set<string>();
+  for (const r of roles) {
+    const perms = DEFAULT_ROLE_PERMISSIONS[r] || ['dashboard'];
+    for (const p of perms) {
+      combined.add(p);
+    }
+  }
+  return Array.from(combined);
+}
+
 export function hasPermission(
-  user: { role: string; permissions?: string[] } | null | undefined,
+  user: { role?: string; roles?: string[]; permissions?: string[]; isPrimaryAccount?: boolean; accountType?: string; isAssignedRole?: boolean } | null | undefined,
   permission: string
 ): boolean {
   if (!user) return false;
-  if (
-    user.role === 'SUPER_ADMIN' ||
-    user.role === 'CHURCH_OWNER' ||
-    user.role === 'CHURCH_ADMINISTRATOR' ||
-    user.role === 'ADMINISTRATOR'
-  ) return true;
 
-  const userPerms = (user.permissions && user.permissions.length > 0)
-    ? user.permissions
-    : getDefaultRolePermissions(user.role);
+  // Platform Super Admin has universal access
+  if (user.role === 'SUPER_ADMIN') return true;
+
+  // Registered church owner has all church modules
+  if (user.role === 'CHURCH_OWNER') return true;
+
+  // Primary church registered administrator account (not an assigned staff role)
+  if (user.role === 'CHURCH_ADMINISTRATOR' && !user.isAssignedRole && !user.accountType) {
+    return true;
+  }
+
+  // For any staff member, determine permissions strictly from their assigned permissions or roles
+  let userPerms: string[] = [];
+  if (Array.isArray(user.permissions) && user.permissions.length > 0) {
+    userPerms = user.permissions;
+  } else if (Array.isArray(user.roles) && user.roles.length > 0) {
+    userPerms = getCombinedPermissionsForRoles(user.roles);
+  } else if (user.role) {
+    userPerms = getDefaultRolePermissions(user.role);
+  }
 
   if (userPerms.includes('*') || userPerms.includes(permission)) return true;
 
-  // Also handle alias mapping between short keys ('giving') and full keys ('manage_giving')
+  // Handle alias mapping between short keys ('giving') and full keys ('manage_giving')
   const aliasMap: Record<string, string[]> = {
     view_dashboard: ['dashboard'],
     dashboard: ['view_dashboard'],
@@ -124,7 +160,7 @@ export function hasPermission(
     attendance: ['manage_attendance'],
     send_sms: ['sms'],
     sms: ['send_sms'],
-    manage_giving: ['giving', 'finances'],
+    manage_giving: ['giving', 'finances', 'expenses'],
     giving: ['manage_giving'],
     manage_visitors: ['visitors'],
     visitors: ['manage_visitors'],
@@ -134,6 +170,8 @@ export function hasPermission(
     departments: ['manage_departments'],
     manage_events: ['events'],
     events: ['manage_events'],
+    manage_tasks: ['tasks'],
+    tasks: ['manage_tasks'],
     manage_staff: ['staff'],
     staff: ['manage_staff'],
     manage_settings: ['settings'],
@@ -586,3 +624,40 @@ export interface SystemNotification {
   sentBy: string;
   createdAt: string;
 }
+
+export type MinistryTaskCategory =
+  | 'Pastoral Follow-up'
+  | 'Event Setup'
+  | 'Visitation'
+  | 'Administration'
+  | 'Finance Audit'
+  | 'Media & Sound'
+  | 'Welfare & Outreach'
+  | 'General'
+  | string;
+
+export type MinistryTaskPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
+
+export type MinistryTaskStatus = 'Pending' | 'In Progress' | 'Completed' | 'Cancelled';
+
+export interface MinistryTask {
+  id: string;
+  churchId: string;
+  title: string;
+  description?: string;
+  category: MinistryTaskCategory;
+  assignedToName?: string;
+  assignedToRole?: string;
+  assignedMemberId?: string;
+  departmentId?: string;
+  departmentName?: string;
+  priority: MinistryTaskPriority;
+  dueDate: string;
+  status: MinistryTaskStatus;
+  cancelledReason?: string;
+  completedAt?: string;
+  completedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+

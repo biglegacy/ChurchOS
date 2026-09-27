@@ -150,20 +150,73 @@ export function enforceTenant(req: AuthenticatedRequest, res: Response, next: Ne
 
 export function getUserPermissions(user: User): string[] {
   if (user.role === 'SUPER_ADMIN') return ['*'];
-  if (user.role === 'CHURCH_OWNER' || user.role === 'CHURCH_ADMINISTRATOR' || user.role === 'ADMINISTRATOR') {
+  if (user.role === 'CHURCH_OWNER') return ['*'];
+  if (user.role === 'CHURCH_ADMINISTRATOR' && !user.isAssignedRole && !user.accountType) {
     return ['*'];
   }
+
+  // If user has explicitly assigned permissions array, use IT strictly
   if (Array.isArray(user.permissions) && user.permissions.length > 0) {
     return user.permissions;
   }
+
+  // If multiple roles assigned, calculate strict union of those roles ONLY
+  if (Array.isArray(user.roles) && user.roles.length > 0) {
+    const combined = new Set<string>();
+    for (const r of user.roles) {
+      const perms = getDefaultRolePermissions(r);
+      for (const p of perms) {
+        combined.add(p);
+      }
+    }
+    return Array.from(combined);
+  }
+
   return getDefaultRolePermissions(user.role);
 }
 
 export function hasPermission(user: User, permission: string): boolean {
   if (user.role === 'SUPER_ADMIN') return true;
-  if (user.role === 'CHURCH_OWNER' || user.role === 'CHURCH_ADMINISTRATOR' || user.role === 'ADMINISTRATOR') return true;
+  if (user.role === 'CHURCH_OWNER') return true;
+  if (user.role === 'CHURCH_ADMINISTRATOR' && !user.isAssignedRole && !user.accountType) return true;
+
   const perms = getUserPermissions(user);
-  return perms.includes('*') || perms.includes(permission);
+  if (perms.includes('*') || perms.includes(permission)) return true;
+
+  // Handle alias mapping between short keys ('giving') and full keys ('manage_giving')
+  const aliasMap: Record<string, string[]> = {
+    view_dashboard: ['dashboard'],
+    dashboard: ['view_dashboard'],
+    manage_members: ['members'],
+    members: ['manage_members'],
+    manage_attendance: ['attendance'],
+    attendance: ['manage_attendance'],
+    send_sms: ['sms'],
+    sms: ['send_sms'],
+    manage_giving: ['giving', 'finances', 'expenses'],
+    giving: ['manage_giving', 'finances', 'expenses'],
+    finances: ['manage_giving', 'giving'],
+    expenses: ['manage_giving', 'giving'],
+    manage_visitors: ['visitors'],
+    visitors: ['manage_visitors'],
+    manage_pastoral: ['pastoral'],
+    pastoral: ['manage_pastoral'],
+    manage_departments: ['departments'],
+    departments: ['manage_departments'],
+    manage_events: ['events'],
+    events: ['manage_events'],
+    manage_tasks: ['tasks'],
+    tasks: ['manage_tasks'],
+    manage_staff: ['staff'],
+    staff: ['manage_staff'],
+    manage_settings: ['settings'],
+    settings: ['manage_settings'],
+    view_reports: ['reports', 'giving'],
+    reports: ['view_reports'],
+  };
+
+  const aliases = aliasMap[permission] || [];
+  return aliases.some(alias => perms.includes(alias));
 }
 
 export function requirePermission(permission: string) {

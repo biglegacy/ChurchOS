@@ -14,6 +14,9 @@ import {
   HeartHandshake,
   Calendar,
   Cake,
+  ListTodo,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { Church } from '../types';
@@ -28,20 +31,41 @@ interface Props {
 
 export const ChurchDashboard: React.FC<Props> = ({ church, onNavigateTab, onQuickAction }) => {
   const [data, setData] = useState<any>(null);
+  const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useAutoDismissNotification(error, setError, 2000);
+  useAutoDismissNotification(notice, setNotice, 3000);
+  useAutoDismissNotification(error, setError, 3000);
 
   const loadDashboard = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await ApiClient.get('/api/church/dashboard');
-      setData(res);
+      const [dashRes, tasksRes] = await Promise.all([
+        ApiClient.get('/api/church/dashboard'),
+        ApiClient.get('/api/church/tasks').catch(() => []),
+      ]);
+      setData(dashRes);
+      setTasks(Array.isArray(tasksRes) ? tasksRes : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCompleteAllCancelledTasks = async () => {
+    try {
+      const res = await ApiClient.post('/api/church/tasks/complete-cancelled', {});
+      if (res.count > 0) {
+        setNotice(`Successfully completed ${res.count} cancelled task(s).`);
+        await loadDashboard();
+      } else {
+        setNotice('No cancelled tasks found.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to complete cancelled tasks.');
     }
   };
 
@@ -64,9 +88,17 @@ export const ChurchDashboard: React.FC<Props> = ({ church, onNavigateTab, onQuic
   const upcomingEvents = Array.isArray(data?.upcomingEvents) ? data.upcomingEvents : [];
   const recentGiving = Array.isArray(data?.recentGiving) ? data.recentGiving : [];
   const currency = church?.settings?.currency || 'GH₵';
+  const cancelledTasks = (tasks || []).filter(t => t.status === 'Cancelled');
 
   return (
     <div className="space-y-6 pb-16 text-left">
+      {notice && (
+        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-semibold flex items-center space-x-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{notice}</span>
+        </div>
+      )}
+
       {/* Sleek 4-Column KPI Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {/* Total Members */}
@@ -336,6 +368,70 @@ export const ChurchDashboard: React.FC<Props> = ({ church, onNavigateTab, onQuic
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Ministry Tasks Overview Card */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center space-x-2">
+            <ListTodo className="w-5 h-5 text-teal-700" />
+            <h3 className="font-bold text-slate-800 text-base">Ministry Tasks & Action Items</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            {cancelledTasks.length > 0 && (
+              <button
+                onClick={handleCompleteAllCancelledTasks}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition cursor-pointer"
+                title="Complete all cancelled tasks"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Complete Cancelled ({cancelledTasks.length})</span>
+              </button>
+            )}
+            <button
+              onClick={() => onNavigateTab('tasks')}
+              className="text-xs text-teal-700 hover:text-teal-900 font-semibold flex items-center gap-1"
+            >
+              <span>Manage All</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {tasks.length === 0 ? (
+          <p className="text-xs text-slate-400 py-3">No tasks created yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {tasks.slice(0, 4).map(t => (
+              <div
+                key={t.id}
+                onClick={() => onNavigateTab('tasks')}
+                className="p-3 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-100 flex items-center justify-between cursor-pointer transition-colors"
+              >
+                <div className="space-y-0.5">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold text-slate-900">{t.title}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                        t.status === 'Cancelled'
+                          ? 'bg-rose-100 text-rose-800'
+                          : t.status === 'Completed'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {t.status}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {t.category} • Due: {t.dueDate} {t.assignedToName ? `• ${t.assignedToName}` : ''}
+                  </p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Financial Net Overview & Recent Contributions */}

@@ -42,43 +42,46 @@ service cloud.firestore {
 
     // Multi-tenant scoped collections: strict church tenant isolation
     match /members/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /families/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /visitors/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /newConverts/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /services/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /attendance/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /giving/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /expenses/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /accounts/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /pastoralCases/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /departments/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /events/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
+    }
+    match /tasks/{id} {
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
     match /smsMessages/{id} {
-      allow read, write: if isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId) || request.auth == null;
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }
 
     match /smsUnitAudits/{auditId} {

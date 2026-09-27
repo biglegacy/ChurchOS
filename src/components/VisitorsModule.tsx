@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Search,
   X,
+  Trash2,
 } from 'lucide-react';
 import { ApiClient } from '../api';
 import { Visitor, NewConvert } from '../types';
@@ -28,6 +29,14 @@ export const VisitorsModule: React.FC = () => {
   // Modals
   const [showAddVisitorModal, setShowAddVisitorModal] = useState(false);
   const [showAddConvertModal, setShowAddConvertModal] = useState(false);
+
+  // In-app Delete & Promote Modals (replaces window.confirm)
+  const [visitorToDelete, setVisitorToDelete] = useState<Visitor | null>(null);
+  const [isDeletingVisitor, setIsDeletingVisitor] = useState(false);
+  const [convertToDelete, setConvertToDelete] = useState<NewConvert | null>(null);
+  const [isDeletingConvert, setIsDeletingConvert] = useState(false);
+  const [visitorToPromote, setVisitorToPromote] = useState<Visitor | null>(null);
+  const [isPromoting, setIsPromoting] = useState(false);
 
   // Forms
   const [visitorForm, setVisitorForm] = useState({
@@ -123,14 +132,55 @@ export const VisitorsModule: React.FC = () => {
     }
   };
 
-  const handleConvertToMember = async (visitor: Visitor) => {
-    if (!confirm(`Promote visitor "${visitor.fullName}" to Full Church Member?`)) return;
+  const handleConvertToMember = (visitor: Visitor) => {
+    setVisitorToPromote(visitor);
+  };
+
+  const handleConfirmPromoteVisitor = async () => {
+    if (!visitorToPromote) return;
     try {
-      const res = await ApiClient.post(`/api/church/visitors/${visitor.id}/convert-to-member`);
+      setIsPromoting(true);
+      setError(null);
+      const res = await ApiClient.post(`/api/church/visitors/${visitorToPromote.id}/convert-to-member`);
       setNotice(res.message);
+      setVisitorToPromote(null);
       await Promise.all([loadData(), refreshMembers()]);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Failed to promote visitor.');
+    } finally {
+      setIsPromoting(false);
+    }
+  };
+
+  const handleConfirmDeleteVisitor = async () => {
+    if (!visitorToDelete) return;
+    try {
+      setIsDeletingVisitor(true);
+      setError(null);
+      await ApiClient.delete(`/api/church/visitors/${visitorToDelete.id}`);
+      setNotice(`Visitor "${visitorToDelete.fullName}" record deleted.`);
+      setVisitors(prev => prev.filter(v => v.id !== visitorToDelete.id));
+      setVisitorToDelete(null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete visitor.');
+    } finally {
+      setIsDeletingVisitor(false);
+    }
+  };
+
+  const handleConfirmDeleteConvert = async () => {
+    if (!convertToDelete) return;
+    try {
+      setIsDeletingConvert(true);
+      setError(null);
+      await ApiClient.delete(`/api/church/visitors/converts/${convertToDelete.id}`);
+      setNotice(`Convert "${convertToDelete.fullName}" record deleted.`);
+      setConverts(prev => prev.filter(c => c.id !== convertToDelete.id));
+      setConvertToDelete(null);
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete convert record.');
+    } finally {
+      setIsDeletingConvert(false);
     }
   };
 
@@ -281,11 +331,19 @@ export const VisitorsModule: React.FC = () => {
 
                     <button
                       onClick={() => handleConvertToMember(v)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg flex items-center space-x-1 shadow-xs transition"
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg flex items-center space-x-1 shadow-xs transition cursor-pointer"
                       title="Promote to Full Member"
                     >
                       <UserCheck className="w-3.5 h-3.5" />
                       <span>Make Member</span>
+                    </button>
+
+                    <button
+                      onClick={() => setVisitorToDelete(v)}
+                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                      title="Delete Visitor Record"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -325,10 +383,18 @@ export const VisitorsModule: React.FC = () => {
                   <div className="flex items-center space-x-2 shrink-0">
                     <button
                       onClick={() => handleAdvanceDiscipleship(c.id, c.discipleshipStage)}
-                      className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 font-medium rounded-md flex items-center space-x-1 transition-colors"
+                      className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 font-medium rounded-md flex items-center space-x-1 transition-colors cursor-pointer"
                     >
                       <span>Advance Stage</span>
                       <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => setConvertToDelete(c)}
+                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                      title="Delete Convert Record"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -527,6 +593,200 @@ export const VisitorsModule: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* PROMOTE VISITOR CONFIRMATION MODAL */}
+      {visitorToPromote && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden text-left animate-in fade-in zoom-in duration-150">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-emerald-800">
+                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <UserCheck className="w-4 h-4 text-emerald-700" />
+                </div>
+                <h3 className="font-bold text-sm text-emerald-950">Promote to Full Church Member</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVisitorToPromote(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3 text-xs text-slate-600">
+              <p>
+                Are you sure you want to promote visitor{' '}
+                <strong className="text-slate-900 font-bold">{visitorToPromote.fullName}</strong>{' '}
+                to a full, registered church member?
+              </p>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
+                <div><strong>Phone:</strong> {visitorToPromote.phone}</div>
+                <div><strong>First Visit Date:</strong> {visitorToPromote.firstVisitDate}</div>
+                <div><strong>Status:</strong> {visitorToPromote.followUpStatus}</div>
+              </div>
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-[11px]">
+                A new membership code will be generated and assigned to this member profile automatically.
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setVisitorToPromote(null)}
+                disabled={isPromoting}
+                className="px-4 py-2 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPromoteVisitor}
+                disabled={isPromoting}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isPromoting ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Promoting...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Confirm Promotion</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE VISITOR CONFIRMATION MODAL */}
+      {visitorToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden text-left animate-in fade-in zoom-in duration-150">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-rose-800">
+                <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center">
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                </div>
+                <h3 className="font-bold text-sm text-rose-950">Delete Visitor Record</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVisitorToDelete(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3 text-xs text-slate-600">
+              <p>
+                Are you sure you want to permanently delete the visitor record for{' '}
+                <strong className="text-slate-900 font-bold">{visitorToDelete.fullName}</strong>?
+              </p>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
+                <div><strong>Phone:</strong> {visitorToDelete.phone}</div>
+                <div><strong>Visit Date:</strong> {visitorToDelete.firstVisitDate}</div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setVisitorToDelete(null)}
+                disabled={isDeletingVisitor}
+                className="px-4 py-2 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteVisitor}
+                disabled={isDeletingVisitor}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingVisitor ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Yes, Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONVERT CONFIRMATION MODAL */}
+      {convertToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden text-left animate-in fade-in zoom-in duration-150">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-rose-800">
+                <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center">
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                </div>
+                <h3 className="font-bold text-sm text-rose-950">Delete Convert Record</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConvertToDelete(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3 text-xs text-slate-600">
+              <p>
+                Are you sure you want to permanently delete the discipleship convert record for{' '}
+                <strong className="text-slate-900 font-bold">{convertToDelete.fullName}</strong>?
+              </p>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
+                <div><strong>Phone:</strong> {convertToDelete.phone}</div>
+                <div><strong>Decision:</strong> {convertToDelete.decisionType}</div>
+                <div><strong>Stage:</strong> {convertToDelete.discipleshipStage}</div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setConvertToDelete(null)}
+                disabled={isDeletingConvert}
+                className="px-4 py-2 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteConvert}
+                disabled={isDeletingConvert}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingConvert ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Yes, Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

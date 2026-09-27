@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
-import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent, SmsMessage, User, hashPassword, getDefaultRolePermissions, GivingCategory, GIVING_CATEGORIES, resolveReliableGivingCategory } from '../db';
-import { requireAuth, enforceTenant, AuthenticatedRequest } from '../auth';
+import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent, MinistryTask, SmsMessage, User, hashPassword, getDefaultRolePermissions, GivingCategory, GIVING_CATEGORIES, resolveReliableGivingCategory } from '../db';
+import { requireAuth, enforceTenant, requirePermission, AuthenticatedRequest } from '../auth';
 import { SmsService, normalizePhoneNumber } from '../smsService';
 
 const router = Router();
@@ -672,7 +672,15 @@ router.put('/visitors/:id', (req: AuthenticatedRequest, res: Response) => {
   res.json({ success: true });
 });
 
-router.post('/visitors/:id/convert', (req: AuthenticatedRequest, res: Response) => {
+router.delete('/visitors/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const { id } = req.params;
+  db.update('visitors', list => list.filter(v => !(v.id === id && v.churchId === churchId)));
+  await db.deleteDoc('visitors', id).catch(console.error);
+  res.json({ message: 'Visitor record removed successfully.' });
+});
+
+const handleConvertVisitorToMember = (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
 
@@ -718,16 +726,21 @@ router.post('/visitors/:id/convert', (req: AuthenticatedRequest, res: Response) 
   );
 
   res.json({ success: true, message: `${visitor.fullName} has been converted into a registered Church Member.`, member });
-});
+};
+
+router.post('/visitors/:id/convert', handleConvertVisitorToMember);
+router.post('/visitors/:id/convert-to-member', handleConvertVisitorToMember);
 
 // ================= NEW CONVERTS ================= //
-router.get('/converts', (req: AuthenticatedRequest, res: Response) => {
+const getConvertsHandler = (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const converts = db.get('newConverts').filter(c => c.churchId === churchId);
   res.json(converts);
-});
+};
+router.get('/converts', getConvertsHandler);
+router.get('/visitors/converts', getConvertsHandler);
 
-router.post('/converts', (req: AuthenticatedRequest, res: Response) => {
+const createConvertHandler = (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const data = req.body;
 
@@ -758,9 +771,11 @@ router.post('/converts', (req: AuthenticatedRequest, res: Response) => {
 
   db.update('newConverts', list => [newConvert, ...list]);
   res.status(201).json(newConvert);
-});
+};
+router.post('/converts', createConvertHandler);
+router.post('/visitors/converts', createConvertHandler);
 
-router.put('/converts/:id', (req: AuthenticatedRequest, res: Response) => {
+const updateConvertHandler = (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const updates = req.body;
@@ -770,7 +785,19 @@ router.put('/converts/:id', (req: AuthenticatedRequest, res: Response) => {
   );
 
   res.json({ success: true });
-});
+};
+router.put('/converts/:id', updateConvertHandler);
+router.put('/visitors/converts/:id', updateConvertHandler);
+
+const deleteConvertHandler = async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const { id } = req.params;
+  db.update('newConverts', list => list.filter(c => !(c.id === id && c.churchId === churchId)));
+  await db.deleteDoc('newConverts', id).catch(console.error);
+  res.json({ message: 'Convert record removed successfully.' });
+};
+router.delete('/converts/:id', deleteConvertHandler);
+router.delete('/visitors/converts/:id', deleteConvertHandler);
 
 // ================= SERVICES & ATTENDANCE ================= //
 router.get('/services', (req: AuthenticatedRequest, res: Response) => {
@@ -1736,64 +1763,58 @@ const dismissedNotificationSet = new Set<string>();
 router.get('/notifications', (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const notifications: any[] = [];
+  const church = db.get('churches').find(c => c.id === churchId);
 
-  // 1. Recent Givings (last 8)
-  const givings = db.get('giving')
-    .filter(g => g.churchId === churchId)
-    .slice(0, 8);
-  givings.forEach(g => {
-    const id = `notif_giv_${g.id}`;
-    if (!dismissedNotificationSet.has(id)) {
-      notifications.push({
-        id,
-        churchId,
-        title: `Contribution: ${g.givingType}`,
-        message: `Received ${g.currency || 'GH₵'} ${(Number(g.amount) || 0).toLocaleString()} from ${g.memberName}. (Receipt: ${g.receiptNumber || g.referenceNumber || 'Cash'})`,
-        category: 'FINANCE',
-        severity: 'info',
-        isRead: readNotificationSet.has(id),
-        createdAt: g.createdAt,
-        linkTab: 'giving',
-      });
+  // 1. Critical: Low SMS Units Alert (< 50 units or depleted 0 units)
+  if (church) {
+    const credits = church.smsCredits ?? 0;
+    if (credits <= 0) {
+      const id = `notif_sms_depleted_${churchId}`;
+      if (!dismissedNotificationSet.has(id)) {
+        notifications.push({
+          id,
+          churchId,
+          title: 'SMS Balance Depleted (0 Units)',
+          message: 'Your church has exhausted its SMS units. Automated absence alerts, receipts, and broadcasts are paused until units are allocated.',
+          category: 'SMS',
+          severity: 'critical',
+          isRead: readNotificationSet.has(id),
+          createdAt: church.updatedAt || new Date().toISOString(),
+          linkTab: 'settings',
+        });
+      }
+    } else if (credits <= 50) {
+      const id = `notif_sms_low_${churchId}`;
+      if (!dismissedNotificationSet.has(id)) {
+        notifications.push({
+          id,
+          churchId,
+          title: `Low SMS Balance Warning (${credits} Units Remaining)`,
+          message: `Your SMS balance is low (${credits} units remaining). Please contact platform administration to top up units.`,
+          category: 'SMS',
+          severity: 'high',
+          isRead: readNotificationSet.has(id),
+          createdAt: church.updatedAt || new Date().toISOString(),
+          linkTab: 'settings',
+        });
+      }
     }
-  });
+  }
 
-  // 2. Recent Expenses (last 8)
-  const expenses = db.get('expenses')
-    .filter(e => e.churchId === churchId)
-    .slice(0, 8);
-  expenses.forEach(e => {
-    const id = `notif_exp_${e.id}`;
+  // 2. Critical: Failed SMS Dispatches (Carrier or Gateway Rejections)
+  const failedSmsList = db.get('smsMessages')
+    .filter(s => s.churchId === churchId && (s.status === 'Failed' || s.status === 'Rejected' || s.status === 'Prohibited'))
+    .slice(0, 10);
+  failedSmsList.forEach(s => {
+    const id = `notif_sms_fail_${s.id}`;
     if (!dismissedNotificationSet.has(id)) {
       notifications.push({
         id,
         churchId,
-        title: `Expense: ${e.category}`,
-        message: `Disbursed ${e.currency || 'GH₵'} ${(Number(e.amount) || 0).toLocaleString()} to ${e.payee} (${e.paymentMethod}).`,
-        category: 'FINANCE',
-        severity: 'info',
-        isRead: readNotificationSet.has(id),
-        createdAt: e.createdAt,
-        linkTab: 'giving',
-      });
-    }
-  });
-
-  // 3. Recent SMS Dispatches (last 8)
-  const smsList = db.get('smsMessages')
-    .filter(s => s.churchId === churchId)
-    .slice(0, 8);
-  smsList.forEach(s => {
-    const id = `notif_sms_${s.id}`;
-    if (!dismissedNotificationSet.has(id)) {
-      const isFailed = s.status === 'Failed';
-      notifications.push({
-        id,
-        churchId,
-        title: `SMS Dispatch: ${s.notificationType || 'Announcement'}`,
-        message: `Dispatched to ${s.recipientName || s.phone}. Status: ${s.status}.`,
+        title: `SMS Gateway Delivery Failed: ${s.recipientName || s.phone}`,
+        message: `Failed to deliver ${s.notificationType || 'SMS'} to ${s.recipientName || s.phone}. ${s.failureReason || 'Carrier transmission error.'}`,
         category: 'SMS',
-        severity: isFailed ? 'high' : 'info',
+        severity: 'high',
         isRead: readNotificationSet.has(id),
         createdAt: s.createdAt,
         linkTab: 'sms',
@@ -1801,56 +1822,35 @@ router.get('/notifications', (req: AuthenticatedRequest, res: Response) => {
     }
   });
 
-  // 4. Upcoming Church Events (next 6)
-  const events = db.get('events')
-    .filter(ev => ev.churchId === churchId && ev.status !== 'Completed')
-    .slice(0, 6);
-  events.forEach(ev => {
-    const id = `notif_evt_${ev.id}`;
+  // 3. Important: Urgent Ministry Tasks & Follow-ups
+  const urgentTasks = db.get('tasks')
+    .filter(t => t.churchId === churchId && t.priority === 'Urgent' && t.status !== 'Completed' && t.status !== 'Cancelled')
+    .slice(0, 5);
+  urgentTasks.forEach(t => {
+    const id = `notif_task_${t.id}`;
     if (!dismissedNotificationSet.has(id)) {
       notifications.push({
         id,
         churchId,
-        title: `Event: ${ev.title}`,
-        message: `${ev.category || 'Event'} scheduled for ${ev.date} at ${ev.startTime || '06:00 PM'} (${ev.venue}).`,
-        category: 'EVENT',
-        severity: 'info',
+        title: `Urgent Action Required: ${t.title}`,
+        message: `Assigned to ${t.assignedToName || 'Ministry Staff'}. Status: ${t.status}${t.dueDate ? ` (Due: ${t.dueDate})` : ''}.`,
+        category: 'SYSTEM',
+        severity: 'high',
         isRead: readNotificationSet.has(id),
-        createdAt: ev.createdAt,
-        linkTab: 'events',
+        createdAt: t.createdAt,
+        linkTab: 'tasks',
       });
     }
   });
 
-  // 5. Recent Visitors (last 6)
-  const visitors = db.get('visitors')
-    .filter(v => v.churchId === churchId)
-    .slice(0, 6);
-  visitors.forEach(v => {
-    const id = `notif_vis_${v.id}`;
-    if (!dismissedNotificationSet.has(id)) {
-      notifications.push({
-        id,
-        churchId,
-        title: `New Guest: ${v.fullName}`,
-        message: `First-time visitor recorded for ${v.serviceAttended} (${v.followUpStatus}).`,
-        category: 'MEMBER',
-        severity: 'info',
-        isRead: readNotificationSet.has(id),
-        createdAt: v.createdAt,
-        linkTab: 'visitors',
-      });
-    }
-  });
-
-  // 6. System Notifications
+  // 4. Critical: Platform Announcements & Super Admin Broadcasts
   const sysNotifs = db.get('systemNotifications') || [];
   sysNotifs.forEach(sn => {
     const id = `notif_sys_${sn.id}`;
     if (!dismissedNotificationSet.has(id)) {
       notifications.push({
         id,
-        title: `System Alert: ${sn.title}`,
+        title: `System Notice: ${sn.title}`,
         message: sn.message,
         category: 'SYSTEM',
         severity: sn.severity || 'info',
@@ -1874,11 +1874,10 @@ router.post('/notifications/mark-read', (req: AuthenticatedRequest, res: Respons
   const { id, all } = req.body;
   if (all) {
     const churchId = getChurchId(req);
-    db.get('giving').filter(g => g.churchId === churchId).forEach(g => readNotificationSet.add(`notif_giv_${g.id}`));
-    db.get('expenses').filter(e => e.churchId === churchId).forEach(e => readNotificationSet.add(`notif_exp_${e.id}`));
-    db.get('smsMessages').filter(s => s.churchId === churchId).forEach(s => readNotificationSet.add(`notif_sms_${s.id}`));
-    db.get('events').filter(ev => ev.churchId === churchId).forEach(ev => readNotificationSet.add(`notif_evt_${ev.id}`));
-    db.get('visitors').filter(v => v.churchId === churchId).forEach(v => readNotificationSet.add(`notif_vis_${v.id}`));
+    readNotificationSet.add(`notif_sms_depleted_${churchId}`);
+    readNotificationSet.add(`notif_sms_low_${churchId}`);
+    db.get('smsMessages').filter(s => s.churchId === churchId).forEach(s => readNotificationSet.add(`notif_sms_fail_${s.id}`));
+    db.get('tasks').filter(t => t.churchId === churchId).forEach(t => readNotificationSet.add(`notif_task_${t.id}`));
     (db.get('systemNotifications') || []).forEach(sn => readNotificationSet.add(`notif_sys_${sn.id}`));
   } else if (id) {
     readNotificationSet.add(id);
@@ -1989,6 +1988,219 @@ router.delete('/events/:id', async (req: AuthenticatedRequest, res: Response) =>
   db.update('events', list => list.filter(e => e.id !== eventId));
   await db.deleteDoc('events', eventId).catch(console.error);
   res.json({ success: true, message: `Event "${event.title}" has been deleted.` });
+});
+
+router.post('/events/complete-cancelled', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const events = db.get('events').filter(e => e.churchId === churchId);
+  const cancelledEvents = events.filter(e => e.status === 'Cancelled');
+
+  if (cancelledEvents.length === 0) {
+    res.json({ success: true, count: 0, message: 'No cancelled events found to complete.' });
+    return;
+  }
+
+  const updatedIds = new Set(cancelledEvents.map(e => e.id));
+  db.update('events', list =>
+    list.map(e => (updatedIds.has(e.id) ? { ...e, status: 'Completed' } : e))
+  );
+
+  for (const evt of cancelledEvents) {
+    await db.saveDoc('events', evt.id, { ...evt, status: 'Completed' }).catch(console.error);
+  }
+
+  // Audit log
+  const now = new Date().toISOString();
+  const auditEntry = {
+    id: `aud_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    churchId,
+    userId: req.user?.id || 'system',
+    userName: req.user?.fullName || 'Church Leadership',
+    action: 'EVENTS_COMPLETED_BATCH',
+    details: `Completed all ${cancelledEvents.length} cancelled event(s).`,
+    timestamp: now,
+  };
+  db.update('auditLogs', list => [auditEntry, ...list]);
+  await db.saveDoc('auditLogs', auditEntry.id, auditEntry).catch(console.error);
+
+  res.json({
+    success: true,
+    count: cancelledEvents.length,
+    message: `Successfully completed ${cancelledEvents.length} cancelled event(s).`,
+  });
+});
+
+// ================= MINISTRY TASKS & ACTION ITEMS (CHURCH TENANT) ================= //
+router.get('/tasks', (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const tasks = (db.get('tasks') || []).filter(t => t.churchId === churchId);
+  res.json(tasks);
+});
+
+router.post('/tasks', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const {
+    title,
+    description,
+    category,
+    assignedToName,
+    assignedToRole,
+    assignedMemberId,
+    departmentId,
+    departmentName,
+    priority,
+    dueDate,
+    status,
+  } = req.body;
+
+  if (!title || !title.trim()) {
+    res.status(400).json({ error: 'Task title is required.' });
+    return;
+  }
+
+  const id = `tsk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const now = new Date().toISOString();
+
+  const newTask: MinistryTask = {
+    id,
+    churchId,
+    title: title.trim(),
+    description: description ? description.trim() : '',
+    category: category || 'General',
+    assignedToName: assignedToName ? assignedToName.trim() : undefined,
+    assignedToRole: assignedToRole || undefined,
+    assignedMemberId: assignedMemberId || undefined,
+    departmentId: departmentId || undefined,
+    departmentName: departmentName || undefined,
+    priority: priority || 'Medium',
+    dueDate: dueDate || new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+    status: status || 'Pending',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  db.update('tasks', list => [newTask, ...(list || [])]);
+  await db.saveDoc('tasks', id, newTask).catch(console.error);
+
+  const auditEntry = {
+    id: `aud_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    churchId,
+    userId: req.user?.id || 'system',
+    userName: req.user?.fullName || 'Church Leadership',
+    action: 'TASK_CREATED',
+    details: `Created task: "${newTask.title}" [${newTask.priority} Priority].`,
+    timestamp: now,
+  };
+  db.update('auditLogs', list => [auditEntry, ...list]);
+  await db.saveDoc('auditLogs', auditEntry.id, auditEntry).catch(console.error);
+
+  res.status(201).json(newTask);
+});
+
+router.put('/tasks/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const taskId = req.params.id;
+  const task = (db.get('tasks') || []).find(t => t.id === taskId && t.churchId === churchId);
+
+  if (!task) {
+    res.status(404).json({ error: 'Task record not found.' });
+    return;
+  }
+
+  const updates = req.body;
+  const now = new Date().toISOString();
+  const isCompleting = updates.status === 'Completed' && task.status !== 'Completed';
+
+  const updatedTask: MinistryTask = {
+    ...task,
+    ...updates,
+    id: task.id,
+    churchId: task.churchId,
+    completedAt: isCompleting ? now : (updates.completedAt || task.completedAt),
+    completedBy: isCompleting ? (req.user?.fullName || 'Church Leadership') : task.completedBy,
+    updatedAt: now,
+  };
+
+  db.update('tasks', list => (list || []).map(t => (t.id === taskId ? updatedTask : t)));
+  await db.saveDoc('tasks', taskId, updatedTask).catch(console.error);
+
+  res.json(updatedTask);
+});
+
+router.delete('/tasks/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const taskId = req.params.id;
+  const task = (db.get('tasks') || []).find(t => t.id === taskId && t.churchId === churchId);
+
+  if (!task) {
+    res.status(404).json({ error: 'Task record not found.' });
+    return;
+  }
+
+  db.update('tasks', list => (list || []).filter(t => t.id !== taskId));
+  await db.deleteDoc('tasks', taskId).catch(console.error);
+
+  res.json({ success: true, message: `Task "${task.title}" has been deleted.` });
+});
+
+// Complete all tasks that were cancelled
+router.post('/tasks/complete-cancelled', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const tasks = (db.get('tasks') || []).filter(t => t.churchId === churchId);
+  const cancelledTasks = tasks.filter(t => t.status === 'Cancelled');
+
+  if (cancelledTasks.length === 0) {
+    res.json({
+      success: true,
+      count: 0,
+      tasks: [],
+      message: 'No cancelled tasks found to complete.',
+    });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const completedBy = req.user?.fullName || 'Church Leadership';
+
+  const updatedTasksMap = new Map<string, MinistryTask>();
+  for (const t of cancelledTasks) {
+    updatedTasksMap.set(t.id, {
+      ...t,
+      status: 'Completed',
+      completedAt: now,
+      completedBy,
+      updatedAt: now,
+    });
+  }
+
+  db.update('tasks', list =>
+    (list || []).map(t => (updatedTasksMap.has(t.id) ? updatedTasksMap.get(t.id)! : t))
+  );
+
+  for (const [tId, updatedTask] of updatedTasksMap.entries()) {
+    await db.saveDoc('tasks', tId, updatedTask).catch(console.error);
+  }
+
+  // Audit log
+  const auditEntry = {
+    id: `aud_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    churchId,
+    userId: req.user?.id || 'system',
+    userName: completedBy,
+    action: 'TASKS_COMPLETED_BATCH',
+    details: `Completed all ${cancelledTasks.length} cancelled ministry task(s).`,
+    timestamp: now,
+  };
+  db.update('auditLogs', list => [auditEntry, ...list]);
+  await db.saveDoc('auditLogs', auditEntry.id, auditEntry).catch(console.error);
+
+  const updatedTasksList = Array.from(updatedTasksMap.values());
+  res.json({
+    success: true,
+    count: cancelledTasks.length,
+    tasks: updatedTasksList,
+    message: `Successfully completed all ${cancelledTasks.length} cancelled task(s).`,
+  });
 });
 
 // ================= SMS COMMUNICATION (CHURCH TENANT) ================= //
@@ -2623,15 +2835,17 @@ router.get('/staff', (req: AuthenticatedRequest, res: Response) => {
 
   // Return staff without sensitive passwordHash, with explicit accountType and differentiation
   const safeStaff = users.map(u => {
-    // A user is the primary church account if marked isPrimaryAccount or if it is the church owner/admin matching church credentials
+    // A user is the primary church account if not an assigned role and matches church credentials
     const isPrimary = Boolean(
-      u.isPrimaryAccount ||
-      u.role === 'CHURCH_OWNER' ||
-      (!u.isAssignedRole && !u.assignedMemberId && (
+      !u.isAssignedRole &&
+      !u.assignedMemberId &&
+      (
+        u.isPrimaryAccount ||
+        u.role === 'CHURCH_OWNER' ||
         (church?.adminEmail && u.email && u.email.toLowerCase() === church.adminEmail.toLowerCase()) ||
-        (church?.username && u.username && u.username.toLowerCase() === church.username.toLowerCase()) ||
+        (church?.email && u.email && u.email.toLowerCase() === church.email.toLowerCase()) ||
         u.role === 'CHURCH_ADMINISTRATOR'
-      ))
+      )
     );
 
     return {
@@ -2845,14 +3059,15 @@ router.delete('/staff/:id', async (req: AuthenticatedRequest, res: Response) => 
 
   // Differentiate church account from member assigned roles
   const isPrimary = Boolean(
-    targetUser.isPrimaryAccount ||
-    targetUser.role === 'CHURCH_OWNER' ||
-    targetUser.role === 'SUPER_ADMIN' ||
-    (!targetUser.isAssignedRole && !targetUser.assignedMemberId && (
+    !targetUser.isAssignedRole &&
+    !targetUser.assignedMemberId &&
+    (
+      targetUser.isPrimaryAccount ||
+      targetUser.role === 'CHURCH_OWNER' ||
+      targetUser.role === 'SUPER_ADMIN' ||
       (church?.adminEmail && targetUser.email && targetUser.email.toLowerCase() === church.adminEmail.toLowerCase()) ||
-      (church?.username && targetUser.username && targetUser.username.toLowerCase() === church.username.toLowerCase()) ||
-      targetUser.role === 'CHURCH_ADMINISTRATOR'
-    ))
+      (church?.email && targetUser.email && targetUser.email.toLowerCase() === church.email.toLowerCase())
+    )
   );
 
   if (isPrimary) {

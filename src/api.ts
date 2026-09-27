@@ -2,6 +2,21 @@ const TOKEN_KEY = 'church_os_auth_token';
 const USER_KEY = 'church_os_auth_user';
 const CHURCH_KEY = 'church_os_auth_church';
 
+// Resolve base API URL (e.g. when frontend is deployed to Cloudflare Pages and backend is on Cloud Run)
+const API_BASE_URL = (
+  typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL
+    ? import.meta.env.VITE_API_URL
+    : ''
+).replace(/\/$/, '');
+
+function buildUrl(endpoint: string): string {
+  if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+    return endpoint;
+  }
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return API_BASE_URL ? `${API_BASE_URL}${cleanEndpoint}` : cleanEndpoint;
+}
+
 export class ApiClient {
   public static getToken(): string | null {
     return localStorage.getItem(TOKEN_KEY);
@@ -58,9 +73,10 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
+    const fullUrl = buildUrl(endpoint);
     let res: Response;
     try {
-      res = await fetch(endpoint, {
+      res = await fetch(fullUrl, {
         ...options,
         headers,
       });
@@ -80,7 +96,14 @@ export class ApiClient {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      const errorMsg = data.error || data.message || `Request failed with status ${res.status}`;
+      let errorMsg = data.error || data.message;
+      if (!errorMsg) {
+        if (res.status === 405) {
+          errorMsg = 'Method Not Allowed (405). The server or Cloudflare endpoint rejected the request method. Check API route routing.';
+        } else {
+          errorMsg = `Request failed with status ${res.status}`;
+        }
+      }
       const err: any = new Error(errorMsg);
       err.status = res.status;
       err.code = data.code;

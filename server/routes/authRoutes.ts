@@ -187,20 +187,26 @@ router.post('/login', (req: Request, res: Response) => {
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      roles: Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : [user.role],
       customRoleTitle: user.customRoleTitle,
-      permissions: user.permissions && user.permissions.length > 0 ? user.permissions : getDefaultRolePermissions(user.role),
+      permissions: user.permissions && user.permissions.length > 0 ? user.permissions : (user.roles ? computePermissionsForRoles(user.roles) : getDefaultRolePermissions(user.role)),
       churchId: user.churchId,
       status: user.status,
+      isPrimaryAccount: Boolean(user.isPrimaryAccount),
+      isAssignedRole: Boolean(user.isAssignedRole),
+      assignedMemberId: user.assignedMemberId,
+      accountType: user.accountType || (user.isPrimaryAccount ? 'CHURCH_ACCOUNT' : 'ASSIGNED_MEMBER_ROLE'),
     },
     church: {
       id: church.id,
       name: church.name,
-      senderName: church.settings.senderName,
+      senderName: church.settings?.senderName || church.settings?.smsSenderId,
       status: church.status,
       features: church.features,
-      currency: church.settings.currency,
+      currency: church.settings?.currency || 'GH₵',
       logo: church.logo,
-      smsCredits: church.smsCredits ?? 500,
+      smsCredits: church.smsCredits ?? 0,
+      smsAllocatedUnits: church.smsAllocatedUnits ?? 0,
     },
     redirectTo,
   });
@@ -321,7 +327,11 @@ router.post('/register-church', (req: Request, res: Response) => {
     adminPhone: normAdminPhone,
     logo: churchLogo || '',
     status: 'ACTIVE',
-    smsCredits: 500,
+    smsCredits: 0,
+    smsAllocatedUnits: 0,
+    smsUnitsUsed: 0,
+    smsPricePerUnit: 0.05,
+    smsStatus: 'ACTIVE',
     subscription: {
       plan: 'Trial SaaS Plan',
       status: 'ACTIVE',
@@ -340,6 +350,7 @@ router.post('/register-church', (req: Request, res: Response) => {
     },
     settings: {
       senderName: autoSender,
+      smsSenderId: autoSender,
       currency: 'GH₵',
       absenceSmsEnabled: true,
       absenceSmsDelayMinutes: 15,
@@ -361,28 +372,34 @@ router.post('/register-church', (req: Request, res: Response) => {
     passwordHash: hashPassword(password.trim()),
     fullName: finalAdminName,
     role: 'CHURCH_ADMINISTRATOR',
+    roles: ['CHURCH_ADMINISTRATOR'],
     churchId,
     phone: normAdminPhone,
     status: 'ACTIVE',
+    isPrimaryAccount: true,
+    isAssignedRole: false,
+    accountType: 'CHURCH_ACCOUNT',
+    permissions: ['*'],
     createdAt: now,
   };
 
   db.update('churches', list => [newChurch, ...list]);
   db.update('users', list => [newUser, ...list]);
+  await db.saveDoc('churches', newChurch.id, newChurch).catch(console.error);
+  await db.saveDoc('users', newUser.id, newUser).catch(console.error);
 
   // Record audit log
-  db.update('auditLogs', logs => [
-    {
-      id: `aud_${Date.now()}`,
-      churchId,
-      userId,
-      userName: finalAdminName,
-      action: 'CHURCH_REGISTERED',
-      details: `Church "${finalChurchName}" registered with administrator "${finalAdminName}". Account activated.`,
-      timestamp: now,
-    },
-    ...logs.slice(0, 499),
-  ]);
+  const auditEntry = {
+    id: `aud_${Date.now()}`,
+    churchId,
+    userId,
+    userName: finalAdminName,
+    action: 'CHURCH_REGISTERED',
+    details: `Church "${finalChurchName}" registered with administrator "${finalAdminName}". Account activated.`,
+    timestamp: now,
+  };
+  db.update('auditLogs', logs => [auditEntry, ...logs.slice(0, 499)]);
+  await db.saveDoc('auditLogs', auditEntry.id, auditEntry).catch(console.error);
 
   const token = createToken(newUser);
 
@@ -396,17 +413,24 @@ router.post('/register-church', (req: Request, res: Response) => {
       email: newUser.email,
       fullName: newUser.fullName,
       role: newUser.role,
+      roles: newUser.roles,
       churchId: newUser.churchId,
       status: newUser.status,
+      isPrimaryAccount: true,
+      isAssignedRole: false,
+      accountType: 'CHURCH_ACCOUNT',
+      permissions: ['*'],
     },
     church: {
       id: newChurch.id,
       name: newChurch.name,
-      senderName: newChurch.settings.senderName,
+      senderName: newChurch.settings?.senderName,
       status: newChurch.status,
       features: newChurch.features,
-      currency: newChurch.settings.currency,
+      currency: newChurch.settings?.currency || 'GH₵',
       logo: newChurch.logo,
+      smsCredits: 0,
+      smsAllocatedUnits: 0,
     },
     redirectTo: '/church/dashboard',
   });
@@ -419,6 +443,12 @@ router.get('/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
+  const churchSettings = req.church ? { ...req.church.settings } : undefined;
+  if (churchSettings) {
+    // Registered churches must never see SMS API keys or credentials
+    delete churchSettings.smsApiKey;
+  }
+
   res.json({
     user: {
       id: req.user.id,
@@ -426,23 +456,29 @@ router.get('/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
       email: req.user.email,
       fullName: req.user.fullName,
       role: req.user.role,
+      roles: Array.isArray(req.user.roles) && req.user.roles.length > 0 ? req.user.roles : [req.user.role],
       customRoleTitle: req.user.customRoleTitle,
-      permissions: req.user.permissions && req.user.permissions.length > 0 ? req.user.permissions : getDefaultRolePermissions(req.user.role),
+      permissions: req.user.permissions && req.user.permissions.length > 0 ? req.user.permissions : (req.user.roles ? computePermissionsForRoles(req.user.roles) : getDefaultRolePermissions(req.user.role)),
       churchId: req.user.churchId,
       phone: req.user.phone,
       status: req.user.status,
+      isPrimaryAccount: Boolean(req.user.isPrimaryAccount),
+      isAssignedRole: Boolean(req.user.isAssignedRole),
+      assignedMemberId: req.user.assignedMemberId,
+      accountType: req.user.accountType || (req.user.isPrimaryAccount ? 'CHURCH_ACCOUNT' : 'ASSIGNED_MEMBER_ROLE'),
     },
     church: req.church ? {
       id: req.church.id,
       name: req.church.name,
-      senderName: req.church.settings.senderName,
+      senderName: req.church.settings?.senderName || req.church.settings?.smsSenderId,
       status: req.church.status,
       features: req.church.features,
-      currency: req.church.settings.currency,
+      currency: req.church.settings?.currency || 'GH₵',
       logo: req.church.logo,
       subscription: req.church.subscription,
-      settings: req.church.settings,
-      smsCredits: (req.church.smsCredits !== undefined && req.church.smsCredits !== null) ? req.church.smsCredits : 500,
+      settings: churchSettings,
+      smsCredits: req.church.smsCredits ?? 0,
+      smsAllocatedUnits: req.church.smsAllocatedUnits ?? 0,
     } : null,
   });
 });

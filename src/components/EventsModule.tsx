@@ -72,13 +72,14 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
     description: '',
   });
 
-  const [activeFilter, setActiveFilter] = useState<'ALL' | 'CUSTOM' | 'CONFERENCES' | 'VIGILS' | 'OTHER'>('ALL');
+  const [activeFilter, setActiveFilter] = useState<'ALL' | 'CUSTOM' | 'CONFERENCES' | 'VIGILS' | 'OTHER' | 'CANCELLED'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isBulkCompleting, setIsBulkCompleting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useAutoDismissNotification(notice, setNotice, 2000);
-  useAutoDismissNotification(error, setError, 2000);
+  useAutoDismissNotification(notice, setNotice, 3000);
+  useAutoDismissNotification(error, setError, 3000);
 
   // In-app Delete Confirmation Modal
   const [eventToDelete, setEventToDelete] = useState<{ id: string; title: string } | null>(null);
@@ -162,8 +163,7 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
     }
   };
 
-  const handleToggleStatus = async (event: ChurchEvent) => {
-    const nextStatus = event.status === 'Completed' ? 'Upcoming' : 'Completed';
+  const handleSetStatus = async (event: ChurchEvent, nextStatus: 'Upcoming' | 'Completed' | 'Cancelled') => {
     try {
       setError(null);
       await ApiClient.put(`/api/church/events/${event.id}`, { status: nextStatus });
@@ -171,6 +171,30 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
       setNotice(`Marked "${event.title}" as ${nextStatus}.`);
     } catch (err: any) {
       setError(err.message || 'Failed to update event status.');
+    }
+  };
+
+  const handleToggleStatus = async (event: ChurchEvent) => {
+    const nextStatus = event.status === 'Completed' ? 'Upcoming' : 'Completed';
+    await handleSetStatus(event, nextStatus);
+  };
+
+  // Complete all events that were cancelled
+  const handleCompleteAllCancelledEvents = async () => {
+    try {
+      setIsBulkCompleting(true);
+      setError(null);
+      const res = await ApiClient.post('/api/church/events/complete-cancelled', {});
+      if (res.count > 0) {
+        setNotice(`All ${res.count} cancelled event(s) have been marked as Completed.`);
+        await loadData();
+      } else {
+        setNotice('No cancelled events found to complete.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to complete cancelled events.');
+    } finally {
+      setIsBulkCompleting(false);
     }
   };
 
@@ -209,6 +233,9 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
     if (!matchesSearch) return false;
 
     // Filter tabs
+    if (activeFilter === 'CANCELLED') {
+      return evt.status === 'Cancelled';
+    }
     if (activeFilter === 'CUSTOM') {
       return !!evt.isCustom || !['Conference', 'Revival', 'Vigil', 'Retreat', 'Outreach', 'Ceremony'].includes(evt.category);
     }
@@ -229,6 +256,8 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
     e => !!e.isCustom || !['Conference', 'Revival', 'Vigil', 'Retreat', 'Outreach', 'Ceremony'].includes(e.category)
   ).length;
 
+  const cancelledEventsCount = (events || []).filter(e => e.status === 'Cancelled').length;
+
   return (
     <div className="space-y-5 pb-20 text-left">
       {/* Top Banner */}
@@ -243,6 +272,17 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {cancelledEventsCount > 0 && (
+            <button
+              onClick={handleCompleteAllCancelledEvents}
+              disabled={isBulkCompleting}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-md shadow-xs flex items-center space-x-1.5 transition-colors cursor-pointer"
+              title="Complete all cancelled events"
+            >
+              <Check className="w-4 h-4" />
+              <span>{isBulkCompleting ? 'Completing...' : `Complete Cancelled (${cancelledEventsCount})`}</span>
+            </button>
+          )}
           <button
             onClick={() => openAddModal('custom')}
             className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-semibold text-xs rounded-md shadow-2xs flex items-center space-x-1.5 transition-colors"
@@ -259,6 +299,22 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
           </button>
         </div>
       </div>
+
+      {cancelledEventsCount > 0 && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center space-x-2 text-xs text-amber-900 font-medium">
+            <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+            <span>You have {cancelledEventsCount} cancelled event(s) on the calendar.</span>
+          </div>
+          <button
+            onClick={handleCompleteAllCancelledEvents}
+            disabled={isBulkCompleting}
+            className="px-3 py-1.5 bg-amber-800 hover:bg-amber-900 text-white text-xs font-bold rounded-lg transition shrink-0 cursor-pointer"
+          >
+            Complete All Cancelled Events
+          </button>
+        </div>
+      )}
 
       {notice && (
         <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-lg flex items-center justify-between">
@@ -328,6 +384,23 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
           >
             Vigils & Retreats
           </button>
+          <button
+            onClick={() => setActiveFilter('CANCELLED')}
+            className={`px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center space-x-1 ${
+              activeFilter === 'CANCELLED'
+                ? 'bg-rose-700 text-white'
+                : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+            }`}
+          >
+            <span>Cancelled</span>
+            {cancelledEventsCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                activeFilter === 'CANCELLED' ? 'bg-rose-900 text-rose-100' : 'bg-rose-200 text-rose-800'
+              }`}>
+                {cancelledEventsCount}
+              </span>
+            )}
+          </button>
         </div>
 
         <div className="relative w-full md:w-64">
@@ -350,7 +423,9 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
           <Calendar className="w-10 h-10 text-slate-300 mx-auto" />
           <p className="text-sm font-semibold text-slate-700">No events found matching your criteria</p>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Schedule a revival, all-night vigil, or create a custom event like a youth camp, harvest praise night, or concert.
+            {activeFilter === 'CANCELLED'
+              ? 'No cancelled events found.'
+              : 'Schedule a revival, all-night vigil, or create a custom event like a youth camp, harvest praise night, or concert.'}
           </p>
           <div className="pt-2 flex justify-center space-x-2">
             <button
@@ -367,12 +442,16 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
             const isCustomEvent =
               evt.isCustom ||
               !['Conference', 'Revival', 'Vigil', 'Retreat', 'Outreach', 'Ceremony'].includes(evt.category);
+            const isCancelled = evt.status === 'Cancelled';
+            const isCompleted = evt.status === 'Completed';
 
             return (
               <div
                 key={evt.id}
                 className={`bg-white p-5 rounded-xl border shadow-xs transition-all text-left space-y-3 flex flex-col justify-between ${
-                  isCustomEvent
+                  isCancelled
+                    ? 'border-rose-200 bg-rose-50/15'
+                    : isCustomEvent
                     ? 'border-amber-200 hover:border-amber-400 bg-linear-to-b from-amber-50/20 to-white'
                     : 'border-slate-200 hover:border-teal-300'
                 }`}
@@ -390,18 +469,42 @@ export const EventsModule: React.FC<Props> = ({ onNavigateTab }) => {
                       <span>{evt.category}</span>
                     </span>
 
-                    <button
-                      type="button"
-                      onClick={() => handleToggleStatus(evt)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${
-                        evt.status === 'Completed'
-                          ? 'bg-slate-100 text-slate-600 border-slate-200'
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                      }`}
-                      title="Click to toggle status"
-                    >
-                      {evt.status || 'Upcoming'}
-                    </button>
+                    <div className="flex items-center space-x-1">
+                      {isCancelled ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSetStatus(evt, 'Completed')}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer"
+                          title="Complete this cancelled event"
+                        >
+                          Complete Event
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleStatus(evt)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${
+                            isCompleted
+                              ? 'bg-slate-100 text-slate-600 border-slate-200'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                          }`}
+                          title="Click to toggle Upcoming / Completed"
+                        >
+                          {evt.status || 'Upcoming'}
+                        </button>
+                      )}
+
+                      {!isCancelled && !isCompleted && (
+                        <button
+                          type="button"
+                          onClick={() => handleSetStatus(evt, 'Cancelled')}
+                          className="px-1.5 py-0.5 rounded text-[10px] text-rose-600 hover:bg-rose-50"
+                          title="Cancel event"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div>

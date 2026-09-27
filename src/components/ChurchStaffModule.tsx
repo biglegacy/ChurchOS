@@ -78,6 +78,7 @@ const PERMISSION_METADATA: Record<ChurchPermission, { label: string; category: s
   manage_pastoral: { label: 'Pastoral Care & Counseling', category: 'Ministry' },
   manage_departments: { label: 'Departments & Cells', category: 'Structure' },
   manage_events: { label: 'Church Calendar & Events', category: 'Operations' },
+  manage_tasks: { label: 'Ministry Tasks & Action Items', category: 'Operations' },
   manage_staff: { label: 'Manage Staff & Roles', category: 'Administration' },
   manage_settings: { label: 'Church Settings & SMS Config', category: 'Administration' },
   view_reports: { label: 'Financial & Growth Reports', category: 'Analytics' },
