@@ -93,6 +93,20 @@
         "createdAt": { "type": "string", "description": "Creation timestamp" }
       },
       "required": ["id", "churchId", "title", "priority", "status"]
+    },
+    "CustomRole": {
+      "title": "CustomRole",
+      "description": "Church-defined custom role with specific selected permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique custom role ID" },
+        "churchId": { "type": "string", "description": "Church organization ID" },
+        "name": { "type": "string", "description": "Custom role title name" },
+        "description": { "type": "string", "description": "Role purpose and description" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" }
+      },
+      "required": ["id", "churchId", "name"]
     }
   },
   "firestore": {
@@ -103,6 +117,10 @@
     "/users/{userId}": {
       "schema": "User",
       "description": "Platform and church user accounts"
+    },
+    "/customRoles/{customRoleId}": {
+      "schema": "CustomRole",
+      "description": "Church custom role definitions with granular permissions"
     },
     "/tasks/{taskId}": {
       "schema": "MinistryTask",

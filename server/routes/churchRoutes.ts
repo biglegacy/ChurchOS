@@ -1,6 +1,30 @@
 import { Router, Response } from 'express';
-import { db, Member, Family, Visitor, NewConvert, ChurchService, AttendanceRecord, GivingRecord, ExpenseRecord, PastoralCase, DepartmentOrGroup, ChurchEvent, MinistryTask, SmsMessage, User, hashPassword, getDefaultRolePermissions, GivingCategory, GIVING_CATEGORIES, resolveReliableGivingCategory } from '../db';
-import { requireAuth, enforceTenant, requirePermission, AuthenticatedRequest } from '../auth';
+import {
+  db,
+  Member,
+  Family,
+  Visitor,
+  NewConvert,
+  ChurchService,
+  AttendanceRecord,
+  GivingRecord,
+  ExpenseRecord,
+  PastoralCase,
+  DepartmentOrGroup,
+  ChurchEvent,
+  MinistryTask,
+  SmsMessage,
+  User,
+  hashPassword,
+  getDefaultRolePermissions,
+  GivingCategory,
+  GIVING_CATEGORIES,
+  resolveReliableGivingCategory,
+  CustomRole,
+  PREDEFINED_ROLES,
+  getPredefinedRolePermissions,
+} from '../db';
+import { requireAuth, enforceTenant, requirePermission, AuthenticatedRequest, getUserPermissions } from '../auth';
 import { SmsService, normalizePhoneNumber } from '../smsService';
 
 const router = Router();
@@ -23,6 +47,44 @@ function getChurchId(req: AuthenticatedRequest): string {
   const firstChurch = db.get('churches')[0];
   return firstChurch ? firstChurch.id : 'ch_grace_temple';
 }
+
+// GET /api/church/me - Authoritative active session profile with live permissions
+router.get('/me', (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Not authenticated. Please log in.' });
+    return;
+  }
+
+  const churchId = getChurchId(req);
+  const livePermissions = getUserPermissions(req.user, churchId);
+  const church = db.get('churches').find(c => c.id === churchId);
+
+  res.json({
+    user: {
+      id: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      fullName: req.user.fullName,
+      phone: req.user.phone,
+      role: req.user.role,
+      roles: req.user.roles || (req.user.role ? req.user.role.split(',').map(s => s.trim()) : ['Viewer/Read Only']),
+      customRoleTitle: req.user.customRoleTitle,
+      status: req.user.status,
+      churchId: req.user.churchId,
+      accountType: req.user.accountType,
+      isPrimaryAccount: req.user.isPrimaryAccount,
+      effectivePermissions: livePermissions,
+    },
+    church: church
+      ? {
+          id: church.id,
+          name: church.name,
+          status: church.status,
+          currency: church.settings?.currency || 'GHS',
+        }
+      : null,
+  });
+});
 
 // Computes Monday to Sunday range of current week
 function getWeekRange(refDate = new Date()) {
@@ -466,7 +528,7 @@ router.post('/members', requirePermission('members'), async (req: AuthenticatedR
   res.status(201).json(newMember);
 });
 
-router.get('/members/:id', (req: AuthenticatedRequest, res: Response) => {
+router.get('/members/:id', requirePermission('members'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
 
@@ -487,7 +549,7 @@ router.get('/members/:id', (req: AuthenticatedRequest, res: Response) => {
   });
 });
 
-router.put('/members/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/members/:id', requirePermission('members'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const updates = req.body;
@@ -518,7 +580,7 @@ router.put('/members/:id', async (req: AuthenticatedRequest, res: Response) => {
   res.json({ success: true, member: updatedMember, message: 'Member updated successfully.' });
 });
 
-router.delete('/members/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/members/:id', requirePermission('members'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
 
@@ -547,7 +609,7 @@ router.delete('/members/:id', async (req: AuthenticatedRequest, res: Response) =
   res.json({ success: true, message: `Member ${member.fullName} deleted successfully.` });
 });
 
-router.post('/members/batch-delete', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/members/batch-delete', requirePermission('members'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { memberIds } = req.body;
   if (!Array.isArray(memberIds) || memberIds.length === 0) {
@@ -568,13 +630,13 @@ router.post('/members/batch-delete', async (req: AuthenticatedRequest, res: Resp
 });
 
 // ================= FAMILIES ================= //
-router.get('/families', (req: AuthenticatedRequest, res: Response) => {
+router.get('/families', requirePermission('members'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const families = db.get('families').filter(f => f.churchId === churchId);
   res.json(families);
 });
 
-router.post('/families', (req: AuthenticatedRequest, res: Response) => {
+router.post('/families', requirePermission('members'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { familyName, headMemberId, headMemberName, spouseMemberId, spouseMemberName, phone, address, members } = req.body;
 
@@ -603,13 +665,13 @@ router.post('/families', (req: AuthenticatedRequest, res: Response) => {
 });
 
 // ================= VISITORS ================= //
-router.get('/visitors', (req: AuthenticatedRequest, res: Response) => {
+router.get('/visitors', requirePermission('visitors'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const visitors = db.get('visitors').filter(v => v.churchId === churchId);
   res.json(visitors);
 });
 
-router.post('/visitors', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/visitors', requirePermission('visitors'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const data = req.body;
 
@@ -660,7 +722,7 @@ router.post('/visitors', async (req: AuthenticatedRequest, res: Response) => {
   res.status(201).json(newVisitor);
 });
 
-router.put('/visitors/:id', (req: AuthenticatedRequest, res: Response) => {
+router.put('/visitors/:id', requirePermission('visitors'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const updates = req.body;
@@ -672,7 +734,7 @@ router.put('/visitors/:id', (req: AuthenticatedRequest, res: Response) => {
   res.json({ success: true });
 });
 
-router.delete('/visitors/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/visitors/:id', requirePermission('visitors'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   db.update('visitors', list => list.filter(v => !(v.id === id && v.churchId === churchId)));
@@ -728,8 +790,8 @@ const handleConvertVisitorToMember = (req: AuthenticatedRequest, res: Response) 
   res.json({ success: true, message: `${visitor.fullName} has been converted into a registered Church Member.`, member });
 };
 
-router.post('/visitors/:id/convert', handleConvertVisitorToMember);
-router.post('/visitors/:id/convert-to-member', handleConvertVisitorToMember);
+router.post('/visitors/:id/convert', requirePermission('visitors'), handleConvertVisitorToMember);
+router.post('/visitors/:id/convert-to-member', requirePermission('visitors'), handleConvertVisitorToMember);
 
 // ================= NEW CONVERTS ================= //
 const getConvertsHandler = (req: AuthenticatedRequest, res: Response) => {
@@ -737,8 +799,8 @@ const getConvertsHandler = (req: AuthenticatedRequest, res: Response) => {
   const converts = db.get('newConverts').filter(c => c.churchId === churchId);
   res.json(converts);
 };
-router.get('/converts', getConvertsHandler);
-router.get('/visitors/converts', getConvertsHandler);
+router.get('/converts', requirePermission('visitors'), getConvertsHandler);
+router.get('/visitors/converts', requirePermission('visitors'), getConvertsHandler);
 
 const createConvertHandler = (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
@@ -772,8 +834,8 @@ const createConvertHandler = (req: AuthenticatedRequest, res: Response) => {
   db.update('newConverts', list => [newConvert, ...list]);
   res.status(201).json(newConvert);
 };
-router.post('/converts', createConvertHandler);
-router.post('/visitors/converts', createConvertHandler);
+router.post('/converts', requirePermission('visitors'), createConvertHandler);
+router.post('/visitors/converts', requirePermission('visitors'), createConvertHandler);
 
 const updateConvertHandler = (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
@@ -786,8 +848,8 @@ const updateConvertHandler = (req: AuthenticatedRequest, res: Response) => {
 
   res.json({ success: true });
 };
-router.put('/converts/:id', updateConvertHandler);
-router.put('/visitors/converts/:id', updateConvertHandler);
+router.put('/converts/:id', requirePermission('visitors'), updateConvertHandler);
+router.put('/visitors/converts/:id', requirePermission('visitors'), updateConvertHandler);
 
 const deleteConvertHandler = async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
@@ -796,8 +858,8 @@ const deleteConvertHandler = async (req: AuthenticatedRequest, res: Response) =>
   await db.deleteDoc('newConverts', id).catch(console.error);
   res.json({ message: 'Convert record removed successfully.' });
 };
-router.delete('/converts/:id', deleteConvertHandler);
-router.delete('/visitors/converts/:id', deleteConvertHandler);
+router.delete('/converts/:id', requirePermission('visitors'), deleteConvertHandler);
+router.delete('/visitors/converts/:id', requirePermission('visitors'), deleteConvertHandler);
 
 // ================= SERVICES & ATTENDANCE ================= //
 router.get('/services', requirePermission('attendance'), (req: AuthenticatedRequest, res: Response) => {
@@ -838,7 +900,7 @@ router.post('/services', requirePermission('attendance'), (req: AuthenticatedReq
   res.status(201).json(newService);
 });
 
-router.get('/services/:id/attendance', (req: AuthenticatedRequest, res: Response) => {
+router.get('/services/:id/attendance', requirePermission('attendance'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
 
@@ -847,7 +909,7 @@ router.get('/services/:id/attendance', (req: AuthenticatedRequest, res: Response
 });
 
 // Mark / update individual or bulk attendance
-router.post('/services/:id/attendance', (req: AuthenticatedRequest, res: Response) => {
+router.post('/services/:id/attendance', requirePermission('attendance'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const { records } = req.body; // Array of { memberId, status: 'Present' | 'Absent' | 'Excused' }
@@ -898,7 +960,7 @@ router.post('/services/:id/attendance', (req: AuthenticatedRequest, res: Respons
 });
 
 // CRITICAL REQUIREMENT: Finalize Attendance and trigger automated Absence SMS!
-router.post('/services/:id/finalize-attendance', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/services/:id/finalize-attendance', requirePermission('attendance'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
 
@@ -929,7 +991,7 @@ const STANDARD_GIVING_TYPES = [
   'Donation',
 ];
 
-router.get('/giving-types', (req: AuthenticatedRequest, res: Response) => {
+router.get('/giving-types', requirePermission('giving'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
   const customTypes: string[] = church?.settings?.customGivingTypes || [];
@@ -941,7 +1003,7 @@ router.get('/giving-types', (req: AuthenticatedRequest, res: Response) => {
   });
 });
 
-router.post('/giving-types', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/giving-types', requirePermission('giving:create'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { name, enableAutoSms } = req.body;
   const trimmed = (name || '').trim();
@@ -983,7 +1045,7 @@ router.post('/giving-types', async (req: AuthenticatedRequest, res: Response) =>
   });
 });
 
-router.delete('/giving-types/:name', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/giving-types/:name', requirePermission('giving:delete'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const nameToDelete = decodeURIComponent(req.params.name).trim();
 
@@ -1059,7 +1121,7 @@ router.get('/giving', requirePermission('giving'), (req: AuthenticatedRequest, r
 });
 
 // Category-Specific Summary & Totals Endpoint
-router.get('/giving/summary', (req: AuthenticatedRequest, res: Response) => {
+router.get('/giving/summary', requirePermission('giving'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const allGiving = db.get('giving').filter(g => g.churchId === churchId);
 
@@ -1220,7 +1282,7 @@ router.post('/giving', requirePermission('giving'), async (req: AuthenticatedReq
 });
 
 // EDIT CONTRIBUTION (Requirement: Add/Edit Giving with Category update & moving between tabs)
-router.put('/giving/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/giving/:id', requirePermission('giving:edit'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const data = req.body;
@@ -1309,7 +1371,7 @@ router.put('/giving/:id', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 // DELETE CONTRIBUTION
-router.delete('/giving/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/giving/:id', requirePermission('giving:delete'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
 
@@ -1342,13 +1404,13 @@ router.delete('/giving/:id', async (req: AuthenticatedRequest, res: Response) =>
 });
 
 // ================= FINANCE ACCOUNTS & EXPENSES ================= //
-router.get('/finance/accounts', (req: AuthenticatedRequest, res: Response) => {
+router.get('/finance/accounts', requirePermission('giving'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const accounts = db.get('accounts').filter(a => a.churchId === churchId);
   res.json(accounts);
 });
 
-router.post('/finance/accounts', (req: AuthenticatedRequest, res: Response) => {
+router.post('/finance/accounts', requirePermission('giving:create'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { accountName, accountType, balance, accountNumber, institution } = req.body;
 
@@ -1386,7 +1448,7 @@ const STANDARD_EXPENSE_CATEGORIES = [
   'Administrative Printing & Supplies',
 ];
 
-router.get('/expense-categories', (req: AuthenticatedRequest, res: Response) => {
+router.get('/expense-categories', requirePermission('expenses'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
   const customCategories: string[] = church?.settings?.customExpenseCategories || [];
@@ -1398,7 +1460,7 @@ router.get('/expense-categories', (req: AuthenticatedRequest, res: Response) => 
   });
 });
 
-router.post('/expense-categories', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/expense-categories', requirePermission('expenses:create'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { name } = req.body;
   const trimmed = (name || '').trim();
@@ -1439,7 +1501,7 @@ router.post('/expense-categories', async (req: AuthenticatedRequest, res: Respon
   });
 });
 
-router.delete('/expense-categories/:name', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/expense-categories/:name', requirePermission('expenses:delete'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const nameToDelete = decodeURIComponent(req.params.name).trim();
 
@@ -1523,7 +1585,7 @@ router.post('/finance/expenses', requirePermission('expenses'), async (req: Auth
   res.status(201).json(newExpense);
 });
 
-router.delete('/finance/expenses/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/finance/expenses/:id', requirePermission('expenses:delete'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   db.update('expenses', list => list.filter(e => !(e.id === id && e.churchId === churchId)));
@@ -1542,7 +1604,7 @@ const STANDARD_PASTORAL_CATEGORIES = [
   'Prayer Request',
 ];
 
-router.get(['/pastoral-categories', '/pastoral-care/categories'], (req: AuthenticatedRequest, res: Response) => {
+router.get(['/pastoral-categories', '/pastoral-care/categories'], requirePermission('pastoral'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
   const customCategories: string[] = church?.settings?.customPastoralCategories || [];
@@ -1553,7 +1615,7 @@ router.get(['/pastoral-categories', '/pastoral-care/categories'], (req: Authenti
   });
 });
 
-router.post(['/pastoral-categories', '/pastoral-care/categories'], async (req: AuthenticatedRequest, res: Response) => {
+router.post(['/pastoral-categories', '/pastoral-care/categories'], requirePermission('pastoral:create'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { name } = req.body;
   const trimmed = (name || '').trim();
@@ -1578,13 +1640,13 @@ router.post(['/pastoral-categories', '/pastoral-care/categories'], async (req: A
   });
 });
 
-router.get(['/pastoral', '/pastoral-care'], (req: AuthenticatedRequest, res: Response) => {
+router.get(['/pastoral', '/pastoral-care'], requirePermission('pastoral'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const cases = db.get('pastoralCases').filter(p => p.churchId === churchId);
   res.json(cases);
 });
 
-router.post(['/pastoral', '/pastoral-care'], async (req: AuthenticatedRequest, res: Response) => {
+router.post(['/pastoral', '/pastoral-care'], requirePermission('pastoral:create'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { caseType, customCaseType, isCustom, memberNameOrSubject, phone, assignedPastor, priority, confidentialNotes, followUpDate } = req.body;
 
@@ -1639,7 +1701,7 @@ router.post(['/pastoral', '/pastoral-care'], async (req: AuthenticatedRequest, r
   res.status(201).json(newCase);
 });
 
-router.put(['/pastoral/:id', '/pastoral-care/:id'], (req: AuthenticatedRequest, res: Response) => {
+router.put(['/pastoral/:id', '/pastoral-care/:id'], requirePermission('pastoral:edit'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const updates = req.body;
@@ -1659,7 +1721,7 @@ const STANDARD_DEPARTMENT_CATEGORIES = [
   'Committee',
 ];
 
-router.get('/department-categories', (req: AuthenticatedRequest, res: Response) => {
+router.get('/department-categories', requirePermission('departments'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
   const customCategories: string[] = church?.settings?.customDepartmentCategories || [];
@@ -1670,7 +1732,7 @@ router.get('/department-categories', (req: AuthenticatedRequest, res: Response) 
   });
 });
 
-router.post('/department-categories', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/department-categories', requirePermission('departments:create'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { name } = req.body;
   const trimmed = (name || '').trim();
@@ -1695,13 +1757,13 @@ router.post('/department-categories', async (req: AuthenticatedRequest, res: Res
   });
 });
 
-router.get('/departments', (req: AuthenticatedRequest, res: Response) => {
+router.get('/departments', requirePermission('departments'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const departments = db.get('departments').filter(d => d.churchId === churchId);
   res.json(departments);
 });
 
-router.post('/departments', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/departments', requirePermission('departments:create'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { name, type, category, customCategory, isCustom, leaderName, leaderPhone, meetingDay, meetingTime, meetingLocation, description } = req.body;
 
@@ -1748,7 +1810,7 @@ router.post('/departments', async (req: AuthenticatedRequest, res: Response) => 
   res.status(201).json(newDept);
 });
 
-router.delete('/departments/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/departments/:id', requirePermission('departments:delete'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   db.update('departments', list => list.filter(d => !(d.id === id && d.churchId === churchId)));
@@ -1894,13 +1956,13 @@ router.delete('/notifications/:id', (req: AuthenticatedRequest, res: Response) =
 });
 
 // ================= EVENTS & CALENDAR ================= //
-router.get('/events', (req: AuthenticatedRequest, res: Response) => {
+router.get('/events', requirePermission('events'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const events = db.get('events').filter(e => e.churchId === churchId);
   res.json(events);
 });
 
-router.post('/events', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/events', requirePermission('events:create'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const {
     title,
@@ -1952,7 +2014,7 @@ router.post('/events', async (req: AuthenticatedRequest, res: Response) => {
   res.status(201).json(newEvent);
 });
 
-router.put('/events/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/events/:id', requirePermission('events:edit'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const eventId = req.params.id;
   const event = db.get('events').find(e => e.id === eventId && e.churchId === churchId);
@@ -1975,7 +2037,7 @@ router.put('/events/:id', async (req: AuthenticatedRequest, res: Response) => {
   res.json(updatedEvent);
 });
 
-router.delete('/events/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/events/:id', requirePermission('events:delete'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const eventId = req.params.id;
   const event = db.get('events').find(e => e.id === eventId && e.churchId === churchId);
@@ -1990,7 +2052,7 @@ router.delete('/events/:id', async (req: AuthenticatedRequest, res: Response) =>
   res.json({ success: true, message: `Event "${event.title}" has been deleted.` });
 });
 
-router.post('/events/complete-cancelled', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/events/complete-cancelled', requirePermission('events:edit'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const events = db.get('events').filter(e => e.churchId === churchId);
   const cancelledEvents = events.filter(e => e.status === 'Cancelled');
@@ -2204,7 +2266,7 @@ router.post('/tasks/complete-cancelled', async (req: AuthenticatedRequest, res: 
 });
 
 // ================= SMS COMMUNICATION (CHURCH TENANT) ================= //
-router.get('/sms/messages', (req: AuthenticatedRequest, res: Response) => {
+router.get('/sms/messages', requirePermission('sms'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const messages = db.get('smsMessages').filter(s => s.churchId === churchId);
   res.json(messages);
@@ -2535,10 +2597,10 @@ async function handleSmsDispatchCore(req: AuthenticatedRequest, res: Response) {
   });
 }
 
-router.post('/sms/send', handleSmsDispatchCore);
+router.post('/sms/send', requirePermission('sms:send'), handleSmsDispatchCore);
 
 // Test SMS Gateway Connection endpoint (Requirement 4)
-router.post('/sms/test-connection', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/sms/test-connection', requirePermission('sms'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { apiKey, senderId, testPhone, gateway } = req.body;
 
@@ -2557,7 +2619,7 @@ router.post('/sms/test-connection', async (req: AuthenticatedRequest, res: Respo
 });
 
 // Dispatch Tithe Reminder SMS (Prompt Requirement 21)
-router.post('/sms/tithe-reminders', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/sms/tithe-reminders', requirePermission('sms:send'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
 
@@ -2611,7 +2673,7 @@ router.post('/sms/tithe-reminders', async (req: AuthenticatedRequest, res: Respo
 });
 
 // Aliases for church communication routes
-router.get('/communication/sms-logs', (req: AuthenticatedRequest, res: Response) => {
+router.get('/communication/sms-logs', requirePermission('sms'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const messages = db.get('smsMessages').filter(s => s.churchId === churchId);
   // Return messages with full delivery status, tracking timestamps, and provider metadata
@@ -2660,7 +2722,7 @@ router.all(['/sms/:id/status', '/communication/sms/:id/status'], async (req: Aut
 });
 
 // Reconcile pending/submitted SMS delivery statuses with Arkesel Gateway
-router.post(['/sms/reconcile', '/communication/sms-reconcile'], async (req: AuthenticatedRequest, res: Response) => {
+router.post(['/sms/reconcile', '/communication/sms-reconcile'], requirePermission('sms'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   try {
     const result = await SmsService.reconcilePendingMessages(churchId);
@@ -2674,9 +2736,9 @@ router.post(['/sms/reconcile', '/communication/sms-reconcile'], async (req: Auth
   }
 });
 
-router.post('/communication/send-sms', handleSmsDispatchCore);
+router.post('/communication/send-sms', requirePermission('sms:send'), handleSmsDispatchCore);
 
-router.post('/communication/tithe-reminder', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/communication/tithe-reminder', requirePermission('sms:send'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
   if (!church) {
@@ -2727,21 +2789,7 @@ router.post('/communication/tithe-reminder', async (req: AuthenticatedRequest, r
 });
 
 // GET & PUT Church Settings
-router.get('/settings', (req: AuthenticatedRequest, res: Response) => {
-  const user = req.user;
-  const isAdminOrPastor = user && [
-    'SUPER_ADMIN',
-    'CHURCH_OWNER',
-    'CHURCH_ADMINISTRATOR',
-    'SENIOR_PASTOR',
-    'PASTOR_MINISTER',
-  ].includes(user.role);
-
-  if (!isAdminOrPastor) {
-    res.status(403).json({ error: 'Access denied. Administrator privileges required to access church configuration and API keys.' });
-    return;
-  }
-
+router.get('/settings', requirePermission('settings'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const church = db.get('churches').find(c => c.id === churchId);
   if (!church) {
@@ -2763,21 +2811,7 @@ router.get('/settings', (req: AuthenticatedRequest, res: Response) => {
   });
 });
 
-router.put('/settings', async (req: AuthenticatedRequest, res: Response) => {
-  const user = req.user;
-  const isAdminOrPastor = user && [
-    'SUPER_ADMIN',
-    'CHURCH_OWNER',
-    'CHURCH_ADMINISTRATOR',
-    'SENIOR_PASTOR',
-    'PASTOR_MINISTER',
-  ].includes(user.role);
-
-  if (!isAdminOrPastor) {
-    res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
-    return;
-  }
-
+router.put('/settings', requirePermission('settings:edit'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { settings, basicInfo } = req.body;
 
@@ -2824,9 +2858,238 @@ router.put('/settings', async (req: AuthenticatedRequest, res: Response) => {
   });
 });
 
-// ================= CHURCH STAFF & CUSTOM ROLES (Requirements 7, 8, 9, 10) ================= //
+// ================= CHURCH STAFF & CUSTOM ROLES (Requirements 1 - 11) ================= //
 
-// GET /api/church/staff - List all staff for this church
+// GET /api/church/predefined-roles - List the 15 available predefined roles with their permissions
+router.get('/predefined-roles', (req: AuthenticatedRequest, res: Response) => {
+  res.json(PREDEFINED_ROLES);
+});
+
+// GET /api/church/custom-roles - List all custom roles created by this church
+router.get('/custom-roles', requirePermission('staff'), (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  if (!churchId) {
+    res.status(403).json({ error: 'Church ID not identified.' });
+    return;
+  }
+
+  const customRoles = (db.get('customRoles') || []).filter(cr => cr.churchId === churchId);
+  const users = db.get('users').filter(u => u.churchId === churchId);
+
+  const customRolesWithCount = customRoles.map(cr => {
+    const assignedCount = users.filter(u =>
+      (Array.isArray(u.roles) && (u.roles.includes(cr.id) || u.roles.includes(cr.name))) ||
+      u.role === cr.name ||
+      u.customRoleTitle === cr.name
+    ).length;
+    return {
+      ...cr,
+      assignedStaffCount: assignedCount,
+    };
+  });
+
+  res.json(customRolesWithCount);
+});
+
+// POST /api/church/custom-roles - Create a custom role for this church
+router.post('/custom-roles', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  if (!churchId) {
+    res.status(403).json({ error: 'Church ID not identified.' });
+    return;
+  }
+
+  const { name, description, permissions } = req.body;
+
+  if (!name || !name.trim()) {
+    res.status(400).json({ error: 'Custom role name is required.' });
+    return;
+  }
+
+  const cleanName = name.trim();
+  const existing = (db.get('customRoles') || []).find(
+    cr => cr.churchId === churchId && cr.name.toLowerCase() === cleanName.toLowerCase()
+  );
+  if (existing) {
+    res.status(400).json({ error: `A custom role named "${cleanName}" already exists for this church.` });
+    return;
+  }
+
+  if (!Array.isArray(permissions) || permissions.length === 0) {
+    res.status(400).json({ error: 'At least one permission must be selected for the custom role.' });
+    return;
+  }
+
+  const newRole: CustomRole = {
+    id: `crole_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    churchId,
+    name: cleanName,
+    description: (description || '').trim(),
+    permissions: Array.from(new Set(permissions)),
+    createdAt: new Date().toISOString(),
+    createdBy: req.user?.fullName || 'Administrator',
+  };
+
+  db.update('customRoles', list => [...(list || []), newRole]);
+  await db.saveDoc('customRoles', newRole.id, newRole).catch(console.error);
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: 'CUSTOM_ROLE_CREATED',
+      details: `Created custom role "${newRole.name}" with ${newRole.permissions.length} permissions: [${newRole.permissions.slice(0, 5).join(', ')}${newRole.permissions.length > 5 ? '...' : ''}].`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.status(201).json({
+    success: true,
+    message: `Custom role "${newRole.name}" created successfully.`,
+    customRole: newRole,
+  });
+});
+
+// PUT /api/church/custom-roles/:id - Edit custom role
+router.put('/custom-roles/:id', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const roleId = req.params.id;
+
+  const existingRole = (db.get('customRoles') || []).find(cr => cr.id === roleId && cr.churchId === churchId);
+  if (!existingRole) {
+    res.status(404).json({ error: 'Custom role not found for this church.' });
+    return;
+  }
+
+  const { name, description, permissions } = req.body;
+
+  if (name && name.trim()) {
+    const cleanName = name.trim();
+    const duplicate = (db.get('customRoles') || []).find(
+      cr => cr.id !== roleId && cr.churchId === churchId && cr.name.toLowerCase() === cleanName.toLowerCase()
+    );
+    if (duplicate) {
+      res.status(400).json({ error: `Another custom role with the name "${cleanName}" already exists.` });
+      return;
+    }
+    existingRole.name = cleanName;
+  }
+
+  if (description !== undefined) {
+    existingRole.description = description.trim();
+  }
+
+  if (Array.isArray(permissions)) {
+    if (permissions.length === 0) {
+      res.status(400).json({ error: 'Custom role must have at least one permission.' });
+      return;
+    }
+    existingRole.permissions = Array.from(new Set(permissions));
+  }
+
+  existingRole.updatedAt = new Date().toISOString();
+
+  db.update('customRoles', list => list.map(cr => (cr.id === roleId ? existingRole : cr)));
+  await db.saveDoc('customRoles', roleId, existingRole).catch(console.error);
+
+  // Synchronize stored permissions on users assigned this custom role
+  const affectedStaff = db.get('users').filter(u =>
+    u.churchId === churchId &&
+    (u.roles?.includes(roleId) || u.roles?.includes(existingRole.name) || u.role === existingRole.name)
+  );
+  for (const staff of affectedStaff) {
+    staff.permissions = getUserPermissions(staff, churchId);
+    await db.saveDoc('users', staff.id, staff).catch(console.error);
+  }
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: 'CUSTOM_ROLE_UPDATED',
+      details: `Updated custom role "${existingRole.name}". Effective permissions refreshed for ${affectedStaff.length} staff member(s).`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({
+    success: true,
+    message: `Custom role "${existingRole.name}" updated successfully. Permissions refreshed immediately for all assigned staff.`,
+    customRole: existingRole,
+  });
+});
+
+// DELETE /api/church/custom-roles/:id - Delete custom role
+router.delete('/custom-roles/:id', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const roleId = req.params.id;
+
+  const existingRole = (db.get('customRoles') || []).find(cr => cr.id === roleId && cr.churchId === churchId);
+  if (!existingRole) {
+    res.status(404).json({ error: 'Custom role not found for this church.' });
+    return;
+  }
+
+  db.update('customRoles', list => list.filter(cr => cr.id !== roleId));
+  await db.deleteDoc('customRoles', roleId).catch(console.error);
+
+  // Unassign role from staff members who had it
+  const affectedStaff = db.get('users').filter(u =>
+    u.churchId === churchId &&
+    (u.roles?.includes(roleId) || u.roles?.includes(existingRole.name) || u.role === existingRole.name)
+  );
+  for (const staff of affectedStaff) {
+    staff.roles = (staff.roles || []).filter(r => r !== roleId && r !== existingRole.name);
+    staff.role = staff.roles.length > 0 ? staff.roles.join(', ') : 'Viewer/Read Only';
+    staff.permissions = getUserPermissions(staff, churchId);
+    await db.saveDoc('users', staff.id, staff).catch(console.error);
+  }
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: 'CUSTOM_ROLE_DELETED',
+      details: `Deleted custom role "${existingRole.name}". Revoked permissions from ${affectedStaff.length} assigned staff account(s).`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({
+    success: true,
+    message: `Custom role "${existingRole.name}" deleted. Revoked permissions from ${affectedStaff.length} assigned user account(s).`,
+  });
+});
+
+// GET /api/church/audit-logs - Church-scoped security audit trail
+router.get('/audit-logs', requirePermission('audit_logs'), (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  if (!churchId) {
+    res.status(403).json({ error: 'Church ID not identified.' });
+    return;
+  }
+
+  const logs = (db.get('auditLogs') || [])
+    .filter(log => log.churchId === churchId)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 200);
+
+  res.json(logs);
+});
+
+// GET /api/church/staff - List all staff for this church with live calculated permissions
 router.get('/staff', requirePermission('staff'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   if (!churchId) {
@@ -2837,9 +3100,8 @@ router.get('/staff', requirePermission('staff'), (req: AuthenticatedRequest, res
   const church = db.get('churches').find(c => c.id === churchId);
   const users = db.get('users').filter(u => u.churchId === churchId);
 
-  // Return staff without sensitive passwordHash, with explicit accountType and differentiation
+  // Return staff without passwordHash, with fresh effective permissions
   const safeStaff = users.map(u => {
-    // A user is the primary church account if not an assigned role and matches church credentials
     const isPrimary = Boolean(
       !u.isAssignedRole &&
       !u.assignedMemberId &&
@@ -2852,6 +3114,8 @@ router.get('/staff', requirePermission('staff'), (req: AuthenticatedRequest, res
       )
     );
 
+    const livePerms = getUserPermissions(u, churchId);
+
     return {
       id: u.id,
       churchId: u.churchId,
@@ -2860,14 +3124,14 @@ router.get('/staff', requirePermission('staff'), (req: AuthenticatedRequest, res
       email: u.email,
       phone: u.phone,
       role: u.role,
-      roles: u.roles || (u.role ? u.role.split(',').map(s => s.trim()) : ['ACCOUNTANT']),
+      roles: u.roles || (u.role ? u.role.split(',').map(s => s.trim()) : ['Viewer/Read Only']),
       customRoleTitle: u.customRoleTitle,
       assignedMemberId: u.assignedMemberId,
       assignedMemberName: u.assignedMemberName,
       isPrimaryAccount: isPrimary,
       isAssignedRole: !isPrimary,
       accountType: isPrimary ? ('CHURCH_ACCOUNT' as const) : ('ASSIGNED_MEMBER_ROLE' as const),
-      permissions: (u.permissions && u.permissions.length > 0) ? u.permissions : getDefaultRolePermissions(u.role),
+      permissions: livePerms,
       status: u.status,
       createdAt: u.createdAt,
       lastLoginAt: u.lastLoginAt,
@@ -2877,7 +3141,7 @@ router.get('/staff', requirePermission('staff'), (req: AuthenticatedRequest, res
   res.json(safeStaff);
 });
 
-// POST /api/church/staff - Create new staff member or assign role to member
+// POST /api/church/staff - Create new staff member or assign roles to member
 router.post('/staff', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   if (!churchId) {
@@ -2885,7 +3149,7 @@ router.post('/staff', requirePermission('staff'), async (req: AuthenticatedReque
     return;
   }
 
-  const { fullName, username, email, phone, role, roles, customRoleTitle, permissions, password, assignedMemberId } = req.body;
+  const { fullName, username, email, phone, role, roles, customRoleTitle, password, assignedMemberId } = req.body;
 
   if (!fullName || !fullName.trim()) {
     res.status(400).json({ error: 'Staff member name is required.' });
@@ -2904,11 +3168,30 @@ router.post('/staff', requirePermission('staff'), async (req: AuthenticatedReque
 
   const selectedRoles: string[] = Array.isArray(roles) && roles.length > 0
     ? roles
-    : (role ? role.split(',').map((s: string) => s.trim()).filter(Boolean) : ['ACCOUNTANT']);
+    : (role ? role.split(',').map((s: string) => s.trim()).filter(Boolean) : ['Viewer/Read Only']);
 
   if (selectedRoles.length === 0) {
-    res.status(400).json({ error: 'At least one assigned role is required.' });
+    res.status(400).json({ error: 'At least one role must be selected.' });
     return;
+  }
+
+  // Validate roles against predefined roles and this church's custom roles (tenant isolation)
+  const churchCustomRoles = (db.get('customRoles') || []).filter(cr => cr.churchId === churchId);
+  for (const r of selectedRoles) {
+    const isPredefined = PREDEFINED_ROLES.some(
+      pr => pr.name.toLowerCase() === r.toLowerCase() ||
+            pr.key.toLowerCase() === r.toLowerCase() ||
+            pr.label.toLowerCase() === r.toLowerCase()
+    );
+    const isCustom = churchCustomRoles.some(
+      cr => cr.id === r || cr.name.toLowerCase() === r.toLowerCase()
+    );
+    if (!isPredefined && !isCustom && r !== 'MEMBER' && r !== 'CUSTOM') {
+      res.status(400).json({
+        error: `Role "${r}" is invalid or does not belong to your church organization.`,
+      });
+      return;
+    }
   }
 
   const cleanUsername = username.trim().toLowerCase();
@@ -2926,18 +3209,6 @@ router.post('/staff', requirePermission('staff'), async (req: AuthenticatedReque
       return;
     }
   }
-
-  // Combine permissions strictly from selected roles only
-  const combinedPerms = new Set<string>();
-  for (const r of selectedRoles) {
-    for (const p of getDefaultRolePermissions(r)) {
-      combinedPerms.add(p);
-    }
-  }
-
-  const assignedPermissions = Array.isArray(permissions) && permissions.length > 0
-    ? permissions
-    : Array.from(combinedPerms);
 
   let assignedMemberName: string | undefined;
   if (assignedMemberId) {
@@ -2964,11 +3235,13 @@ router.post('/staff', requirePermission('staff'), async (req: AuthenticatedReque
     isAssignedRole: true,
     isPrimaryAccount: false,
     accountType: 'ASSIGNED_MEMBER_ROLE',
-    permissions: assignedPermissions,
     passwordHash: hashPassword(password),
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
   };
+
+  // Authoritatively calculate effective permissions from all assigned roles
+  newStaffUser.permissions = getUserPermissions(newStaffUser, churchId);
 
   db.update('users', list => [...list, newStaffUser]);
   await db.saveDoc('users', newStaffUser.id, newStaffUser).catch(console.error);
@@ -2980,8 +3253,8 @@ router.post('/staff', requirePermission('staff'), async (req: AuthenticatedReque
       churchId,
       userId: req.user?.id || 'admin',
       userName: req.user?.fullName || 'Administrator',
-      action: 'STAFF_CREATED',
-      details: `Assigned roles [${selectedRoles.join(', ')}] to ${newStaffUser.fullName}${assignedMemberName ? ` (Member: ${assignedMemberName})` : ''} (username: ${newStaffUser.username}).`,
+      action: 'STAFF_ROLES_ASSIGNED',
+      details: `Assigned roles [${selectedRoles.join(', ')}] to ${newStaffUser.fullName}${assignedMemberName ? ` (Member: ${assignedMemberName})` : ''} (username: ${newStaffUser.username}). Granted ${newStaffUser.permissions?.length || 0} effective permissions.`,
       timestamp: new Date().toISOString(),
     },
     ...logs.slice(0, 499),
@@ -2995,7 +3268,7 @@ router.post('/staff', requirePermission('staff'), async (req: AuthenticatedReque
   });
 });
 
-// PUT /api/church/staff/:id - Update staff member
+// PUT /api/church/staff/:id - Update staff member roles, status, and permissions
 router.put('/staff/:id', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const staffId = req.params.id;
@@ -3006,7 +3279,7 @@ router.put('/staff/:id', requirePermission('staff'), async (req: AuthenticatedRe
     return;
   }
 
-  const { fullName, email, phone, role, roles, customRoleTitle, permissions, status, password, assignedMemberId } = req.body;
+  const { fullName, email, phone, role, roles, customRoleTitle, status, password, assignedMemberId } = req.body;
 
   let updatedPasswordHash = targetUser.passwordHash;
   if (password && password.trim().length >= 4) {
@@ -3017,17 +3290,24 @@ router.put('/staff/:id', requirePermission('staff'), async (req: AuthenticatedRe
     ? roles
     : (role ? role.split(',').map((s: string) => s.trim()).filter(Boolean) : (targetUser.roles || [targetUser.role]));
 
-  // Recalculate permissions strictly from updated roles
-  const combinedPerms = new Set<string>();
+  // Validate roles against church custom roles and predefined roles
+  const churchCustomRoles = (db.get('customRoles') || []).filter(cr => cr.churchId === churchId);
   for (const r of updatedRoles) {
-    for (const p of getDefaultRolePermissions(r)) {
-      combinedPerms.add(p);
+    const isPredefined = PREDEFINED_ROLES.some(
+      pr => pr.name.toLowerCase() === r.toLowerCase() ||
+            pr.key.toLowerCase() === r.toLowerCase() ||
+            pr.label.toLowerCase() === r.toLowerCase()
+    );
+    const isCustom = churchCustomRoles.some(
+      cr => cr.id === r || cr.name.toLowerCase() === r.toLowerCase()
+    );
+    if (!isPredefined && !isCustom && r !== 'MEMBER' && r !== 'CUSTOM') {
+      res.status(400).json({
+        error: `Role "${r}" is invalid or does not belong to your church organization.`,
+      });
+      return;
     }
   }
-
-  const updatedPermissions = Array.isArray(permissions)
-    ? permissions
-    : Array.from(combinedPerms);
 
   let assignedMemberName = targetUser.assignedMemberName;
   if (assignedMemberId) {
@@ -3037,38 +3317,63 @@ router.put('/staff/:id', requirePermission('staff'), async (req: AuthenticatedRe
     }
   }
 
-  db.update('users', list =>
-    list.map(u => {
-      if (u.id === staffId && u.churchId === churchId) {
-        return {
-          ...u,
-          fullName: fullName !== undefined ? fullName.trim() : u.fullName,
-          email: email !== undefined ? email.trim() : u.email,
-          phone: phone !== undefined ? phone.trim() : u.phone,
-          role: updatedRoles.join(', '),
-          roles: updatedRoles,
-          customRoleTitle: customRoleTitle !== undefined ? (customRoleTitle.trim() || undefined) : u.customRoleTitle,
-          assignedMemberId: assignedMemberId !== undefined ? (assignedMemberId || undefined) : u.assignedMemberId,
-          assignedMemberName: assignedMemberName || u.assignedMemberName,
-          permissions: updatedPermissions,
-          status: status || u.status,
-          passwordHash: updatedPasswordHash,
-        };
-      }
-      return u;
-    })
-  );
+  const oldRoles = targetUser.roles || [targetUser.role];
+  const oldStatus = targetUser.status;
+  const newStatus = status || targetUser.status;
 
-  const updated = db.get('users').find(u => u.id === staffId);
-  if (updated) {
-    await db.saveDoc('users', staffId, updated).catch(console.error);
+  const updatedUser: User = {
+    ...targetUser,
+    fullName: fullName !== undefined ? fullName.trim() : targetUser.fullName,
+    email: email !== undefined ? email.trim() : targetUser.email,
+    phone: phone !== undefined ? phone.trim() : targetUser.phone,
+    role: updatedRoles.join(', '),
+    roles: updatedRoles,
+    customRoleTitle: customRoleTitle !== undefined ? (customRoleTitle.trim() || undefined) : targetUser.customRoleTitle,
+    assignedMemberId: assignedMemberId !== undefined ? (assignedMemberId || undefined) : targetUser.assignedMemberId,
+    assignedMemberName: assignedMemberName || targetUser.assignedMemberName,
+    status: newStatus,
+    passwordHash: updatedPasswordHash,
+  };
+
+  // Authoritatively recalculate effective permissions from updated roles
+  updatedUser.permissions = getUserPermissions(updatedUser, churchId);
+
+  db.update('users', list =>
+    list.map(u => (u.id === staffId && u.churchId === churchId ? updatedUser : u))
+  );
+  await db.saveDoc('users', staffId, updatedUser).catch(console.error);
+
+  // Audit logs for role changes and status changes
+  const auditEntries: any[] = [];
+  if (oldStatus !== newStatus) {
+    auditEntries.push({
+      id: `aud_${Date.now()}_status`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: newStatus === 'SUSPENDED' ? 'STAFF_ACCOUNT_DISABLED' : 'STAFF_ACCOUNT_ENABLED',
+      details: `${newStatus === 'SUSPENDED' ? 'Disabled and suspended' : 'Reactivated'} staff account for ${updatedUser.fullName} (@${updatedUser.username}).`,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  const { passwordHash, ...safeUpdated } = updated!;
+  auditEntries.push({
+    id: `aud_${Date.now()}_role`,
+    churchId,
+    userId: req.user?.id || 'admin',
+    userName: req.user?.fullName || 'Administrator',
+    action: 'STAFF_ROLES_UPDATED',
+    details: `Updated roles for ${updatedUser.fullName}: changed from [${oldRoles.join(', ')}] to [${updatedRoles.join(', ')}]. Effective permissions updated (${updatedUser.permissions?.length || 0} permissions).`,
+    timestamp: new Date().toISOString(),
+  });
+
+  db.update('auditLogs', logs => [...auditEntries, ...logs.slice(0, 499)]);
+
+  const { passwordHash, ...safeUpdated } = updatedUser;
 
   res.json({
     success: true,
-    message: `Role details for ${safeUpdated.fullName} updated successfully.`,
+    message: `Staff member ${safeUpdated.fullName} updated successfully. Assigned roles: [${updatedRoles.join(', ')}].`,
     staff: safeUpdated,
   });
 });
@@ -3119,8 +3424,8 @@ router.delete('/staff/:id', requirePermission('staff'), async (req: Authenticate
       churchId,
       userId: req.user?.id || 'admin',
       userName: req.user?.fullName || 'Administrator',
-      action: 'STAFF_ROLE_DELETED',
-      details: `Deleted assigned member role "${targetUser.customRoleTitle || targetUser.role}" for ${targetUser.fullName} (username: ${targetUser.username}).`,
+      action: 'STAFF_ROLE_REMOVED',
+      details: `Revoked roles [${(targetUser.roles || [targetUser.role]).join(', ')}] and deleted staff account for ${targetUser.fullName} (username: ${targetUser.username}).`,
       timestamp: new Date().toISOString(),
     },
     ...logs.slice(0, 499),
@@ -3128,7 +3433,7 @@ router.delete('/staff/:id', requirePermission('staff'), async (req: Authenticate
 
   res.json({
     success: true,
-    message: `Assigned role "${targetUser.customRoleTitle || targetUser.role}" for ${targetUser.fullName} has been deleted successfully.`,
+    message: `Assigned roles for ${targetUser.fullName} have been removed successfully.`,
   });
 });
 

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import { db, User, Church, getDefaultRolePermissions } from './db';
+import { db, User, Church, getDefaultRolePermissions, getPredefinedRolePermissions, CustomRole } from './db';
 
 const JWT_SECRET = process.env.APP_SECRET || 'church_os_secret_key_prod_2026';
 
@@ -148,71 +148,148 @@ export function enforceTenant(req: AuthenticatedRequest, res: Response, next: Ne
   next();
 }
 
-export function getUserPermissions(user: User): string[] {
+export function getUserPermissions(user: User, churchId?: string): string[] {
   if (user.role === 'SUPER_ADMIN') return ['*'];
   if (user.role === 'CHURCH_OWNER') return ['*'];
   if (user.role === 'CHURCH_ADMINISTRATOR' && !user.isAssignedRole && !user.accountType) {
     return ['*'];
   }
 
-  // If user has explicitly assigned permissions array, use IT strictly
-  if (Array.isArray(user.permissions) && user.permissions.length > 0) {
-    return user.permissions;
-  }
+  const effectiveChurchId = churchId || user.churchId;
+  const combined = new Set<string>();
 
-  // If multiple roles assigned, calculate strict union of those roles ONLY
-  if (Array.isArray(user.roles) && user.roles.length > 0) {
-    const combined = new Set<string>();
-    for (const r of user.roles) {
-      const perms = getDefaultRolePermissions(r);
-      for (const p of perms) {
-        combined.add(p);
-      }
+  // Determine all active roles assigned to this staff member
+  const rawRoles: string[] = Array.isArray(user.roles) && user.roles.length > 0
+    ? user.roles
+    : (user.role ? user.role.split(',').map(s => s.trim()).filter(Boolean) : []);
+
+  // Fetch church custom roles for resolution (strictly tenant isolated)
+  const churchCustomRoles: CustomRole[] = effectiveChurchId
+    ? (db.get('customRoles') || []).filter(cr => cr.churchId === effectiveChurchId)
+    : [];
+
+  for (const roleItem of rawRoles) {
+    // 1. Check predefined roles
+    const predefinedPerms = getPredefinedRolePermissions(roleItem);
+    if (predefinedPerms.length > 0) {
+      for (const p of predefinedPerms) combined.add(p);
     }
-    return Array.from(combined);
+
+    // 2. Check church-isolated custom roles (match by ID or Name)
+    const matchedCustom = churchCustomRoles.find(
+      cr => cr.id === roleItem || cr.name.toLowerCase() === roleItem.toLowerCase()
+    );
+    if (matchedCustom && Array.isArray(matchedCustom.permissions)) {
+      for (const p of matchedCustom.permissions) combined.add(p);
+    }
   }
 
-  return getDefaultRolePermissions(user.role);
+  // 3. Include any direct explicit permissions assigned to user
+  if (Array.isArray(user.permissions)) {
+    for (const p of user.permissions) combined.add(p);
+  }
+
+  // If no roles or permissions resolved, return empty list (Strict zero-trust default deny)
+  return Array.from(combined);
 }
 
-export function hasPermission(user: User, permission: string): boolean {
+export function hasPermission(user: User, permission: string, churchId?: string): boolean {
   if (user.role === 'SUPER_ADMIN') return true;
   if (user.role === 'CHURCH_OWNER') return true;
   if (user.role === 'CHURCH_ADMINISTRATOR' && !user.isAssignedRole && !user.accountType) return true;
 
-  const perms = getUserPermissions(user);
+  const perms = getUserPermissions(user, churchId);
   if (perms.includes('*') || perms.includes(permission)) return true;
 
-  // Handle alias mapping between short keys ('giving') and full keys ('manage_giving')
+  // 1. If permission has an action syntax (e.g. "members:view", "tithes:create", "expenses:approve")
+  if (permission.includes(':')) {
+    const [category, action] = permission.split(':');
+
+    // Universal category wildcards
+    if (perms.includes(`${category}:*`) || perms.includes(`manage_${category}`)) {
+      return true;
+    }
+
+    // Broad module grant
+    if (perms.includes(category)) {
+      return true;
+    }
+
+    // Giving sub-categories delegation
+    const givingSubCategories = [
+      'tithes', 'offerings', 'donations', 'special_giving', 'building_fund', 'missions', 'welfare'
+    ];
+    if (givingSubCategories.includes(category)) {
+      if (perms.includes(`giving:${action}`) || perms.includes('giving:*') || perms.includes('giving') || perms.includes('manage_giving')) {
+        return true;
+      }
+    }
+
+    // Check specific action match
+    if (perms.includes(permission)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // 2. If permission is a module/category name (e.g. "members", "giving", "expenses", "attendance", "sms")
+  // Check if user has ANY permission in that category to view the module
+  if (permission === 'giving') {
+    const givingCategories = ['tithes', 'offerings', 'donations', 'special_giving', 'building_fund', 'missions', 'welfare', 'giving', 'finances'];
+    return perms.some(p =>
+      givingCategories.some(cat => p === cat || p.startsWith(`${cat}:`) || p === `manage_${cat}`) ||
+      p === 'manage_giving' ||
+      p === 'finances'
+    );
+  }
+
+  if (permission === 'visitors') {
+    return perms.some(p => p.startsWith('visitors:') || p.startsWith('evangelism:') || p === 'visitors' || p === 'manage_visitors');
+  }
+
+  if (permission === 'pastoral') {
+    return perms.some(p => p.startsWith('pastoral:') || p.startsWith('welfare:') || p === 'pastoral' || p === 'manage_pastoral');
+  }
+
+  // General category check: does user hold any action under this category?
+  const hasCategoryAction = perms.some(p =>
+    p === permission ||
+    p.startsWith(`${permission}:`) ||
+    p === `manage_${permission}` ||
+    p === `view_${permission}`
+  );
+  if (hasCategoryAction) return true;
+
+  // Handle legacy alias mappings
   const aliasMap: Record<string, string[]> = {
-    view_dashboard: ['dashboard'],
-    dashboard: ['view_dashboard'],
-    manage_members: ['members'],
-    members: ['manage_members'],
-    manage_attendance: ['attendance'],
-    attendance: ['manage_attendance'],
-    send_sms: ['sms'],
-    sms: ['send_sms'],
-    manage_giving: ['giving', 'finances', 'expenses'],
-    giving: ['manage_giving', 'finances', 'expenses'],
-    finances: ['manage_giving', 'giving'],
-    expenses: ['manage_giving', 'giving'],
-    manage_visitors: ['visitors'],
-    visitors: ['manage_visitors'],
-    manage_pastoral: ['pastoral'],
-    pastoral: ['manage_pastoral'],
-    manage_departments: ['departments'],
-    departments: ['manage_departments'],
-    manage_events: ['events'],
-    events: ['manage_events'],
-    manage_tasks: ['tasks'],
-    tasks: ['manage_tasks'],
-    manage_staff: ['staff'],
-    staff: ['manage_staff'],
-    manage_settings: ['settings'],
-    settings: ['manage_settings'],
-    view_reports: ['reports', 'giving'],
-    reports: ['view_reports'],
+    view_dashboard: ['dashboard', 'dashboard:view'],
+    dashboard: ['view_dashboard', 'dashboard:view'],
+    manage_members: ['members', 'members:view', 'members:create', 'members:edit'],
+    members: ['manage_members', 'members:view'],
+    manage_attendance: ['attendance', 'attendance:view', 'attendance:create'],
+    attendance: ['manage_attendance', 'attendance:view'],
+    send_sms: ['sms', 'sms:send', 'sms:view'],
+    sms: ['send_sms', 'sms:send', 'sms:view'],
+    manage_giving: ['giving', 'finances', 'tithes:view', 'offerings:view'],
+    finances: ['giving', 'manage_giving', 'tithes:view'],
+    expenses: ['manage_giving', 'expenses:view', 'expenses:create'],
+    manage_visitors: ['visitors', 'visitors:view'],
+    visitors: ['manage_visitors', 'visitors:view'],
+    manage_pastoral: ['pastoral', 'pastoral:view'],
+    pastoral: ['manage_pastoral', 'pastoral:view'],
+    manage_departments: ['departments', 'departments:view'],
+    departments: ['manage_departments', 'departments:view'],
+    manage_events: ['events', 'events:view'],
+    events: ['manage_events', 'events:view'],
+    manage_tasks: ['tasks', 'tasks:view'],
+    tasks: ['manage_tasks', 'tasks:view'],
+    manage_staff: ['staff', 'staff:view'],
+    staff: ['manage_staff', 'staff:view'],
+    manage_settings: ['settings', 'settings:view'],
+    settings: ['manage_settings', 'settings:view'],
+    view_reports: ['reports', 'reports:view', 'financial_reports:view'],
+    reports: ['view_reports', 'reports:view', 'financial_reports:view'],
   };
 
   const aliases = aliasMap[permission] || [];
@@ -225,13 +302,23 @@ export function requirePermission(permission: string) {
       res.status(401).json({ error: 'Authentication required. Please log in.' });
       return;
     }
-    if (!hasPermission(req.user, permission)) {
+
+    if (req.user.status === 'SUSPENDED' || req.user.status === 'INACTIVE') {
+      res.status(403).json({ error: 'Staff account has been disabled or suspended. Contact your church administrator.' });
+      return;
+    }
+
+    const churchId = req.user.churchId || req.church?.id;
+    if (!hasPermission(req.user, permission, churchId)) {
+      const activeRoles = req.user.roles || (req.user.role ? [req.user.role] : []);
       res.status(403).json({
-        error: `Access denied. Your role (${req.user.customRoleTitle || req.user.role}) is not authorized to access the "${permission}" module.`,
+        error: `Access denied. Your assigned role(s) [${activeRoles.join(', ')}] do not have permission "${permission}".`,
         requiredPermission: permission,
+        assignedRoles: activeRoles,
       });
       return;
     }
+
     next();
   };
 }

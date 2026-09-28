@@ -41,6 +41,9 @@ service cloud.firestore {
     }
 
     // Multi-tenant scoped collections: strict church tenant isolation
+    match /customRoles/{id} {
+      allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
+    }
     match /members/{id} {
       allow read, write: if request.auth == null || isChurchTenant(resource.data.churchId) || isChurchTenant(request.resource.data.churchId);
     }

@@ -56,31 +56,365 @@ export interface User {
   lastLoginAt?: string;
 }
 
+export interface CustomRole {
+  id: string;
+  churchId: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  createdAt: string;
+  updatedAt?: string;
+  createdBy?: string;
+}
+
+export interface PredefinedRoleDefinition {
+  name: string;
+  key: string;
+  label: string;
+  description: string;
+  category: 'Clergy' | 'Administration' | 'Finance' | 'Ministry' | 'Operations';
+  permissions: string[];
+}
+
+export const PREDEFINED_ROLES: PredefinedRoleDefinition[] = [
+  {
+    name: 'Pastor',
+    key: 'PASTOR',
+    label: 'Pastor',
+    description: 'Pastoral counseling, preaching, member care, services attendance, visitors & ministry reports.',
+    category: 'Clergy',
+    permissions: [
+      'dashboard:view',
+      'members:view', 'members:create', 'members:edit',
+      'attendance:view', 'attendance:create', 'attendance:edit',
+      'pastoral:view', 'pastoral:create', 'pastoral:edit',
+      'events:view', 'events:create', 'events:edit',
+      'announcements:view', 'announcements:create', 'announcements:edit',
+      'reports:view',
+    ],
+  },
+  {
+    name: 'Administrator',
+    key: 'ADMINISTRATOR',
+    label: 'Administrator',
+    description: 'Full operational authority across all church operational modules, settings and staff management.',
+    category: 'Administration',
+    permissions: [
+      'dashboard:view',
+      'members:view', 'members:create', 'members:edit', 'members:delete', 'members:export',
+      'attendance:view', 'attendance:create', 'attendance:edit', 'attendance:delete', 'attendance:export',
+      'tithes:view', 'tithes:create', 'tithes:edit', 'tithes:delete', 'tithes:export',
+      'offerings:view', 'offerings:create', 'offerings:edit', 'offerings:delete', 'offerings:export',
+      'donations:view', 'donations:create', 'donations:edit', 'donations:delete', 'donations:export',
+      'special_giving:view', 'special_giving:create', 'special_giving:edit', 'special_giving:delete',
+      'building_fund:view', 'building_fund:create', 'building_fund:edit', 'building_fund:delete',
+      'missions:view', 'missions:create', 'missions:edit', 'missions:delete',
+      'welfare:view', 'welfare:create', 'welfare:edit', 'welfare:delete',
+      'expenses:view', 'expenses:create', 'expenses:edit', 'expenses:delete', 'expenses:approve', 'expenses:export',
+      'financial_reports:view', 'financial_reports:export',
+      'events:view', 'events:create', 'events:edit', 'events:delete',
+      'departments:view', 'departments:create', 'departments:edit', 'departments:delete',
+      'staff:view', 'staff:create', 'staff:edit', 'staff:delete',
+      'sms:view', 'sms:send', 'sms:export',
+      'announcements:view', 'announcements:create', 'announcements:edit', 'announcements:delete',
+      'pastoral:view', 'pastoral:create', 'pastoral:edit', 'pastoral:delete',
+      'reports:view', 'reports:export',
+      'settings:view', 'settings:edit',
+      'audit_logs:view', 'audit_logs:export',
+    ],
+  },
+  {
+    name: 'Accounts Officer',
+    key: 'ACCOUNTS_OFFICER',
+    label: 'Accounts Officer',
+    description: 'Day-to-day recording and reporting of tithes, offerings, donations, expenses and funds.',
+    category: 'Finance',
+    permissions: [
+      'dashboard:view',
+      'tithes:view', 'tithes:create', 'tithes:edit', 'tithes:export',
+      'offerings:view', 'offerings:create', 'offerings:edit', 'offerings:export',
+      'donations:view', 'donations:create', 'donations:edit', 'donations:export',
+      'special_giving:view', 'special_giving:create', 'special_giving:edit',
+      'building_fund:view', 'building_fund:create', 'building_fund:edit',
+      'missions:view', 'missions:create', 'missions:edit',
+      'welfare:view',
+      'expenses:view', 'expenses:create', 'expenses:edit', 'expenses:export',
+      'financial_reports:view', 'financial_reports:export',
+    ],
+  },
+  {
+    name: 'Treasurer',
+    key: 'TREASURER',
+    label: 'Treasurer',
+    description: 'Senior finance custodian responsible for tithes, receipts, expense disbursement approval & statements.',
+    category: 'Finance',
+    permissions: [
+      'dashboard:view',
+      'tithes:view', 'tithes:create', 'tithes:edit', 'tithes:export',
+      'offerings:view', 'offerings:create', 'offerings:edit', 'offerings:export',
+      'donations:view', 'donations:create', 'donations:edit', 'donations:export',
+      'special_giving:view', 'special_giving:create', 'special_giving:edit',
+      'building_fund:view', 'building_fund:create', 'building_fund:edit',
+      'missions:view', 'missions:create', 'missions:edit',
+      'welfare:view',
+      'expenses:view', 'expenses:approve', 'expenses:export',
+      'financial_reports:view', 'financial_reports:export',
+    ],
+  },
+  {
+    name: 'Secretary',
+    key: 'SECRETARY',
+    label: 'Secretary',
+    description: 'Church records, congregation registers, attendance, notices, event schedules & SMS correspondence.',
+    category: 'Administration',
+    permissions: [
+      'dashboard:view',
+      'members:view', 'members:create', 'members:edit', 'members:export',
+      'attendance:view', 'attendance:create', 'attendance:edit', 'attendance:export',
+      'events:view', 'events:create', 'events:edit',
+      'announcements:view', 'announcements:create', 'announcements:edit',
+      'sms:view', 'sms:send',
+      'reports:view',
+    ],
+  },
+  {
+    name: 'Auditor',
+    key: 'AUDITOR',
+    label: 'Auditor',
+    description: 'Independent inspection of all financial books, vouchers, tithes, expenditures & audit trails (read-only).',
+    category: 'Finance',
+    permissions: [
+      'dashboard:view',
+      'tithes:view', 'tithes:export',
+      'offerings:view', 'offerings:export',
+      'donations:view', 'donations:export',
+      'special_giving:view',
+      'building_fund:view',
+      'missions:view',
+      'welfare:view',
+      'expenses:view', 'expenses:export',
+      'financial_reports:view', 'financial_reports:export',
+      'audit_logs:view', 'audit_logs:export',
+    ],
+  },
+  {
+    name: 'Welfare Officer',
+    key: 'WELFARE_OFFICER',
+    label: 'Welfare Officer',
+    description: 'Member benevolence, compassion outreach, visitation and welfare assistance coordination.',
+    category: 'Ministry',
+    permissions: [
+      'dashboard:view',
+      'welfare:view', 'welfare:create', 'welfare:edit',
+      'pastoral:view', 'pastoral:create',
+      'members:view',
+      'sms:view', 'sms:send',
+    ],
+  },
+  {
+    name: 'Usher',
+    key: 'USHER',
+    label: 'Usher',
+    description: 'Sanctuary order, congregation welcoming, service attendance headcount and roster check-in.',
+    category: 'Operations',
+    permissions: [
+      'dashboard:view',
+      'attendance:view', 'attendance:create',
+      'events:view',
+    ],
+  },
+  {
+    name: 'Youth Leader',
+    key: 'YOUTH_LEADER',
+    label: 'Youth Leader',
+    description: 'Youth fellowship leadership, youth attendance registers, youth programs & notices.',
+    category: 'Ministry',
+    permissions: [
+      'dashboard:view',
+      'departments:view', 'departments:edit',
+      'attendance:view', 'attendance:create',
+      'events:view', 'events:create',
+      'announcements:view', 'announcements:create',
+      'members:view',
+    ],
+  },
+  {
+    name: 'Children\'s Ministry',
+    key: 'CHILDRENS_MINISTRY',
+    label: 'Children\'s Ministry',
+    description: 'Sunday school management, child attendance tracking, family contacts & children events.',
+    category: 'Ministry',
+    permissions: [
+      'dashboard:view',
+      'attendance:view', 'attendance:create', 'attendance:edit',
+      'events:view', 'events:create',
+      'members:view',
+    ],
+  },
+  {
+    name: 'Evangelism Officer',
+    key: 'EVANGELISM_OFFICER',
+    label: 'Evangelism Officer',
+    description: 'Outreach missions, new converts tracking, first-time visitors follow-up & follow-up SMS.',
+    category: 'Ministry',
+    permissions: [
+      'dashboard:view',
+      'visitors:view', 'visitors:create', 'visitors:edit',
+      'events:view', 'events:create',
+      'announcements:view', 'announcements:create',
+      'sms:view', 'sms:send',
+    ],
+  },
+  {
+    name: 'Choir/Music Leader',
+    key: 'CHOIR_MUSIC_LEADER',
+    label: 'Choir/Music Leader',
+    description: 'Music ministry oversight, choir rehearsals attendance, worship schedules & event order.',
+    category: 'Ministry',
+    permissions: [
+      'dashboard:view',
+      'departments:view', 'departments:edit',
+      'attendance:view', 'attendance:create',
+      'events:view',
+    ],
+  },
+  {
+    name: 'Department Leader',
+    key: 'DEPARTMENT_LEADER',
+    label: 'Department Leader',
+    description: 'Departmental rosters, group meetings, cell attendance & departmental activities.',
+    category: 'Ministry',
+    permissions: [
+      'dashboard:view',
+      'departments:view', 'departments:edit',
+      'attendance:view', 'attendance:create',
+      'events:view', 'events:create',
+    ],
+  },
+  {
+    name: 'Communication Officer',
+    key: 'COMMUNICATION_OFFICER',
+    label: 'Communication Officer',
+    description: 'SMS notifications, broadcast campaigns, church bulletin announcements & delivery monitoring.',
+    category: 'Operations',
+    permissions: [
+      'dashboard:view',
+      'sms:view', 'sms:send', 'sms:export',
+      'announcements:view', 'announcements:create', 'announcements:edit', 'announcements:delete',
+      'events:view',
+    ],
+  },
+  {
+    name: 'Viewer/Read Only',
+    key: 'VIEWER_READ_ONLY',
+    label: 'Viewer/Read Only',
+    description: 'Read-only visibility for ministry observers, council guests or read-only committee members.',
+    category: 'Operations',
+    permissions: [
+      'dashboard:view',
+      'members:view',
+      'events:view',
+      'reports:view',
+    ],
+  },
+];
+
+export function normalizeRoleKey(roleStr: string): string {
+  if (!roleStr) return '';
+  return roleStr.toLowerCase().replace(/[\s\/\_\-]+/g, '');
+}
+
+export function getPredefinedRolePermissions(roleName: string): string[] {
+  if (!roleName) return [];
+  const normalized = normalizeRoleKey(roleName);
+  
+  // Direct match against predefined roles
+  for (const r of PREDEFINED_ROLES) {
+    if (
+      normalizeRoleKey(r.name) === normalized ||
+      normalizeRoleKey(r.key) === normalized ||
+      normalizeRoleKey(r.label) === normalized
+    ) {
+      return r.permissions;
+    }
+  }
+
+  // Alias legacy role names
+  if (normalized === 'accountant' || normalized === 'financeofficer') {
+    return PREDEFINED_ROLES.find(r => r.key === 'ACCOUNTS_OFFICER')?.permissions || [];
+  }
+  if (normalized === 'smsmanager') {
+    return PREDEFINED_ROLES.find(r => r.key === 'COMMUNICATION_OFFICER')?.permissions || [];
+  }
+  if (normalized === 'attendanceofficer') {
+    return PREDEFINED_ROLES.find(r => r.key === 'USHER')?.permissions || [];
+  }
+  if (normalized === 'membermanager') {
+    return PREDEFINED_ROLES.find(r => r.key === 'SECRETARY')?.permissions || [];
+  }
+  if (normalized === 'groupleader') {
+    return PREDEFINED_ROLES.find(r => r.key === 'DEPARTMENT_LEADER')?.permissions || [];
+  }
+  if (normalized === 'seniorpastor' || normalized === 'assistantpastor' || normalized === 'pastorminister') {
+    return PREDEFINED_ROLES.find(r => r.key === 'PASTOR')?.permissions || [];
+  }
+  if (normalized === 'eventcoordinator') {
+    return ['dashboard:view', 'events:view', 'events:create', 'events:edit'];
+  }
+  if (normalized === 'viewer' || normalized === 'readonly') {
+    return PREDEFINED_ROLES.find(r => r.key === 'VIEWER_READ_ONLY')?.permissions || [];
+  }
+
+  // Fallback to legacy dictionary if found
+  if (DEFAULT_ROLE_PERMISSIONS[roleName]) {
+    return DEFAULT_ROLE_PERMISSIONS[roleName];
+  }
+
+  return [];
+}
+
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: ['*'],
-  CHURCH_OWNER: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
-  CHURCH_ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
-  ADMINISTRATOR: ['dashboard', 'members', 'attendance', 'sms', 'giving', 'expenses', 'visitors', 'pastoral', 'departments', 'events', 'tasks', 'staff', 'settings'],
-  ACCOUNTANT: ['dashboard', 'giving', 'expenses'],
-  TREASURER: ['dashboard', 'giving', 'expenses'],
-  FINANCE_OFFICER: ['dashboard', 'giving', 'expenses'],
-  ATTENDANCE_OFFICER: ['dashboard', 'attendance'],
-  MEMBER_MANAGER: ['dashboard', 'members'],
-  SMS_MANAGER: ['dashboard', 'sms'],
-  PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
-  SENIOR_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events', 'departments', 'sms'],
-  ASSISTANT_PASTOR: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
-  PASTOR_MINISTER: ['dashboard', 'members', 'pastoral', 'attendance', 'visitors', 'events'],
-  SECRETARY: ['dashboard', 'members', 'attendance', 'visitors', 'events', 'sms'],
-  EVENT_COORDINATOR: ['dashboard', 'events', 'tasks'],
-  DEPARTMENT_LEADER: ['dashboard', 'departments', 'attendance', 'events'],
-  GROUP_LEADER: ['dashboard', 'departments', 'attendance', 'events'],
+  CHURCH_OWNER: ['*'],
+  CHURCH_ADMINISTRATOR: ['*'],
+  ADMINISTRATOR: PREDEFINED_ROLES.find(r => r.key === 'ADMINISTRATOR')!.permissions,
+  PASTOR: PREDEFINED_ROLES.find(r => r.key === 'PASTOR')!.permissions,
+  'Pastor': PREDEFINED_ROLES.find(r => r.key === 'PASTOR')!.permissions,
+  ACCOUNTS_OFFICER: PREDEFINED_ROLES.find(r => r.key === 'ACCOUNTS_OFFICER')!.permissions,
+  'Accounts Officer': PREDEFINED_ROLES.find(r => r.key === 'ACCOUNTS_OFFICER')!.permissions,
+  ACCOUNTANT: PREDEFINED_ROLES.find(r => r.key === 'ACCOUNTS_OFFICER')!.permissions,
+  TREASURER: PREDEFINED_ROLES.find(r => r.key === 'TREASURER')!.permissions,
+  'Treasurer': PREDEFINED_ROLES.find(r => r.key === 'TREASURER')!.permissions,
+  SECRETARY: PREDEFINED_ROLES.find(r => r.key === 'SECRETARY')!.permissions,
+  'Secretary': PREDEFINED_ROLES.find(r => r.key === 'SECRETARY')!.permissions,
+  AUDITOR: PREDEFINED_ROLES.find(r => r.key === 'AUDITOR')!.permissions,
+  'Auditor': PREDEFINED_ROLES.find(r => r.key === 'AUDITOR')!.permissions,
+  WELFARE_OFFICER: PREDEFINED_ROLES.find(r => r.key === 'WELFARE_OFFICER')!.permissions,
+  'Welfare Officer': PREDEFINED_ROLES.find(r => r.key === 'WELFARE_OFFICER')!.permissions,
+  USHER: PREDEFINED_ROLES.find(r => r.key === 'USHER')!.permissions,
+  'Usher': PREDEFINED_ROLES.find(r => r.key === 'USHER')!.permissions,
+  YOUTH_LEADER: PREDEFINED_ROLES.find(r => r.key === 'YOUTH_LEADER')!.permissions,
+  'Youth Leader': PREDEFINED_ROLES.find(r => r.key === 'YOUTH_LEADER')!.permissions,
+  CHILDRENS_MINISTRY: PREDEFINED_ROLES.find(r => r.key === 'CHILDRENS_MINISTRY')!.permissions,
+  "Children's Ministry": PREDEFINED_ROLES.find(r => r.key === 'CHILDRENS_MINISTRY')!.permissions,
+  EVANGELISM_OFFICER: PREDEFINED_ROLES.find(r => r.key === 'EVANGELISM_OFFICER')!.permissions,
+  'Evangelism Officer': PREDEFINED_ROLES.find(r => r.key === 'EVANGELISM_OFFICER')!.permissions,
+  CHOIR_MUSIC_LEADER: PREDEFINED_ROLES.find(r => r.key === 'CHOIR_MUSIC_LEADER')!.permissions,
+  'Choir/Music Leader': PREDEFINED_ROLES.find(r => r.key === 'CHOIR_MUSIC_LEADER')!.permissions,
+  DEPARTMENT_LEADER: PREDEFINED_ROLES.find(r => r.key === 'DEPARTMENT_LEADER')!.permissions,
+  'Department Leader': PREDEFINED_ROLES.find(r => r.key === 'DEPARTMENT_LEADER')!.permissions,
+  COMMUNICATION_OFFICER: PREDEFINED_ROLES.find(r => r.key === 'COMMUNICATION_OFFICER')!.permissions,
+  'Communication Officer': PREDEFINED_ROLES.find(r => r.key === 'COMMUNICATION_OFFICER')!.permissions,
+  VIEWER_READ_ONLY: PREDEFINED_ROLES.find(r => r.key === 'VIEWER_READ_ONLY')!.permissions,
+  'Viewer/Read Only': PREDEFINED_ROLES.find(r => r.key === 'VIEWER_READ_ONLY')!.permissions,
   MEMBER: ['portal'],
-  CUSTOM: ['dashboard'],
+  CUSTOM: ['dashboard:view'],
 };
 
 export function getDefaultRolePermissions(role: string): string[] {
-  return DEFAULT_ROLE_PERMISSIONS[role] || ['dashboard'];
+  const perms = getPredefinedRolePermissions(role);
+  if (perms && perms.length > 0) return perms;
+  return DEFAULT_ROLE_PERMISSIONS[role] || ['dashboard:view'];
 }
 
 export interface Church {
@@ -620,6 +954,7 @@ export interface MinistryTask {
 export interface DatabaseSchema {
   users: User[];
   churches: Church[];
+  customRoles: CustomRole[];
   members: Member[];
   families: Family[];
   visitors: Visitor[];
@@ -739,6 +1074,7 @@ export function getInitialDb(): DatabaseSchema {
   return {
     users: [superAdminUser],
     churches: [],
+    customRoles: [],
     members: [],
     families: [],
     visitors: [],
@@ -765,6 +1101,7 @@ export function getInitialDb(): DatabaseSchema {
 const COLLECTION_KEYS: Array<keyof Omit<DatabaseSchema, 'platformSettings'>> = [
   'users',
   'churches',
+  'customRoles',
   'members',
   'families',
   'visitors',
@@ -1014,6 +1351,7 @@ class FirebaseDatabase {
     // 2. Cascade delete tenant records from all scoped collections
     const tenantCollections: Array<keyof DatabaseSchema> = [
       'users',
+      'customRoles',
       'members',
       'families',
       'visitors',
@@ -1026,6 +1364,7 @@ class FirebaseDatabase {
       'pastoralCases',
       'departments',
       'events',
+      'tasks',
       'smsMessages',
     ];
 

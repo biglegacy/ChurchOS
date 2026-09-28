@@ -67,8 +67,7 @@ export const Sidebar: React.FC<Props> = ({
     if (
       user.role === 'SUPER_ADMIN' ||
       user.role === 'CHURCH_OWNER' ||
-      user.role === 'CHURCH_ADMINISTRATOR' ||
-      user.role === 'ADMINISTRATOR'
+      (user.role === 'CHURCH_ADMINISTRATOR' && !user.isAssignedRole && !user.accountType)
     ) {
       return true;
     }
