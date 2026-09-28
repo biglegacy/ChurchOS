@@ -132,7 +132,7 @@ export function calculateUpcomingBirthdays(members: Member[], churchId: string, 
 }
 
 // GET /api/church/dashboard - Real live church KPIs
-router.get('/dashboard', (req: AuthenticatedRequest, res: Response) => {
+router.get('/dashboard', requirePermission('dashboard'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const churches = db.get('churches');
   const church = churches.find(c => c.id === churchId);
@@ -354,7 +354,7 @@ router.post('/birthdays/send-greeting', async (req: AuthenticatedRequest, res: R
 });
 
 // ================= MEMBER MANAGEMENT ================= //
-router.get('/members', (req: AuthenticatedRequest, res: Response) => {
+router.get('/members', requirePermission('members'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { search, status, gender, departmentId } = req.query;
 
@@ -385,7 +385,7 @@ router.get('/members', (req: AuthenticatedRequest, res: Response) => {
   res.json(members);
 });
 
-router.post('/members', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/members', requirePermission('members'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const data = req.body;
 
@@ -800,13 +800,13 @@ router.delete('/converts/:id', deleteConvertHandler);
 router.delete('/visitors/converts/:id', deleteConvertHandler);
 
 // ================= SERVICES & ATTENDANCE ================= //
-router.get('/services', (req: AuthenticatedRequest, res: Response) => {
+router.get('/services', requirePermission('attendance'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const services = db.get('services').filter(s => s.churchId === churchId);
   res.json(services);
 });
 
-router.post('/services', (req: AuthenticatedRequest, res: Response) => {
+router.post('/services', requirePermission('attendance'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const data = req.body;
 
@@ -1014,7 +1014,7 @@ router.delete('/giving-types/:name', async (req: AuthenticatedRequest, res: Resp
   });
 });
 
-router.get('/giving', (req: AuthenticatedRequest, res: Response) => {
+router.get('/giving', requirePermission('giving'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { category, givingCategory, search, startDate, endDate, paymentMethod } = req.query;
   const targetCategory = ((category as string) || (givingCategory as string) || '').trim();
@@ -1106,7 +1106,7 @@ router.get('/giving/summary', (req: AuthenticatedRequest, res: Response) => {
   });
 });
 
-router.post('/giving', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/giving', requirePermission('giving'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const data = req.body;
 
@@ -1468,13 +1468,13 @@ router.delete('/expense-categories/:name', async (req: AuthenticatedRequest, res
   });
 });
 
-router.get('/finance/expenses', (req: AuthenticatedRequest, res: Response) => {
+router.get('/finance/expenses', requirePermission('expenses'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const expenses = db.get('expenses').filter(e => e.churchId === churchId);
   res.json(expenses);
 });
 
-router.post('/finance/expenses', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/finance/expenses', requirePermission('expenses'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { category, customCategory, isCustom, amount, payee, paymentMethod, description, date } = req.body;
 
@@ -2817,13 +2817,17 @@ router.put('/settings', async (req: AuthenticatedRequest, res: Response) => {
 
   await db.saveDoc('churches', churchId, updatedChurchRecord).catch(console.error);
 
-  res.json({ success: true, message: 'Church settings updated successfully.' });
+  res.json({
+    success: true,
+    message: 'Church settings updated successfully.',
+    church: updatedChurchRecord,
+  });
 });
 
 // ================= CHURCH STAFF & CUSTOM ROLES (Requirements 7, 8, 9, 10) ================= //
 
 // GET /api/church/staff - List all staff for this church
-router.get('/staff', (req: AuthenticatedRequest, res: Response) => {
+router.get('/staff', requirePermission('staff'), (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   if (!churchId) {
     res.status(403).json({ error: 'Church ID not identified.' });
@@ -2856,6 +2860,7 @@ router.get('/staff', (req: AuthenticatedRequest, res: Response) => {
       email: u.email,
       phone: u.phone,
       role: u.role,
+      roles: u.roles || (u.role ? u.role.split(',').map(s => s.trim()) : ['ACCOUNTANT']),
       customRoleTitle: u.customRoleTitle,
       assignedMemberId: u.assignedMemberId,
       assignedMemberName: u.assignedMemberName,
@@ -2873,14 +2878,14 @@ router.get('/staff', (req: AuthenticatedRequest, res: Response) => {
 });
 
 // POST /api/church/staff - Create new staff member or assign role to member
-router.post('/staff', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/staff', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   if (!churchId) {
     res.status(403).json({ error: 'Church ID not identified.' });
     return;
   }
 
-  const { fullName, username, email, phone, role, customRoleTitle, permissions, password, assignedMemberId } = req.body;
+  const { fullName, username, email, phone, role, roles, customRoleTitle, permissions, password, assignedMemberId } = req.body;
 
   if (!fullName || !fullName.trim()) {
     res.status(400).json({ error: 'Staff member name is required.' });
@@ -2897,8 +2902,12 @@ router.post('/staff', async (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  if (!role) {
-    res.status(400).json({ error: 'Assigned role is required.' });
+  const selectedRoles: string[] = Array.isArray(roles) && roles.length > 0
+    ? roles
+    : (role ? role.split(',').map((s: string) => s.trim()).filter(Boolean) : ['ACCOUNTANT']);
+
+  if (selectedRoles.length === 0) {
+    res.status(400).json({ error: 'At least one assigned role is required.' });
     return;
   }
 
@@ -2918,9 +2927,17 @@ router.post('/staff', async (req: AuthenticatedRequest, res: Response) => {
     }
   }
 
+  // Combine permissions strictly from selected roles only
+  const combinedPerms = new Set<string>();
+  for (const r of selectedRoles) {
+    for (const p of getDefaultRolePermissions(r)) {
+      combinedPerms.add(p);
+    }
+  }
+
   const assignedPermissions = Array.isArray(permissions) && permissions.length > 0
     ? permissions
-    : getDefaultRolePermissions(role);
+    : Array.from(combinedPerms);
 
   let assignedMemberName: string | undefined;
   if (assignedMemberId) {
@@ -2930,6 +2947,8 @@ router.post('/staff', async (req: AuthenticatedRequest, res: Response) => {
     }
   }
 
+  const primaryRoleLabel = selectedRoles.join(', ');
+
   const newStaffUser: User = {
     id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     churchId,
@@ -2937,7 +2956,8 @@ router.post('/staff', async (req: AuthenticatedRequest, res: Response) => {
     username: cleanUsername,
     email: cleanEmail || `${cleanUsername}@church.local`,
     phone: (phone || '').trim(),
-    role,
+    role: primaryRoleLabel,
+    roles: selectedRoles,
     customRoleTitle: (customRoleTitle || '').trim() || undefined,
     assignedMemberId: assignedMemberId || undefined,
     assignedMemberName,
@@ -2961,7 +2981,7 @@ router.post('/staff', async (req: AuthenticatedRequest, res: Response) => {
       userId: req.user?.id || 'admin',
       userName: req.user?.fullName || 'Administrator',
       action: 'STAFF_CREATED',
-      details: `Assigned role ${newStaffUser.customRoleTitle || newStaffUser.role} to ${newStaffUser.fullName}${assignedMemberName ? ` (Member: ${assignedMemberName})` : ''} (username: ${newStaffUser.username}).`,
+      details: `Assigned roles [${selectedRoles.join(', ')}] to ${newStaffUser.fullName}${assignedMemberName ? ` (Member: ${assignedMemberName})` : ''} (username: ${newStaffUser.username}).`,
       timestamp: new Date().toISOString(),
     },
     ...logs.slice(0, 499),
@@ -2970,13 +2990,13 @@ router.post('/staff', async (req: AuthenticatedRequest, res: Response) => {
   const { passwordHash, ...safeUser } = newStaffUser;
   res.status(201).json({
     success: true,
-    message: `Role "${newStaffUser.customRoleTitle || newStaffUser.role}" assigned to ${newStaffUser.fullName} successfully. Login username: "${newStaffUser.username}".`,
+    message: `Roles [${selectedRoles.join(', ')}] assigned to ${newStaffUser.fullName} successfully. Login username: "${newStaffUser.username}".`,
     staff: safeUser,
   });
 });
 
 // PUT /api/church/staff/:id - Update staff member
-router.put('/staff/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/staff/:id', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const staffId = req.params.id;
 
@@ -2986,16 +3006,28 @@ router.put('/staff/:id', async (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  const { fullName, email, phone, role, customRoleTitle, permissions, status, password, assignedMemberId } = req.body;
+  const { fullName, email, phone, role, roles, customRoleTitle, permissions, status, password, assignedMemberId } = req.body;
 
   let updatedPasswordHash = targetUser.passwordHash;
   if (password && password.trim().length >= 4) {
     updatedPasswordHash = hashPassword(password.trim());
   }
 
+  const updatedRoles: string[] = Array.isArray(roles) && roles.length > 0
+    ? roles
+    : (role ? role.split(',').map((s: string) => s.trim()).filter(Boolean) : (targetUser.roles || [targetUser.role]));
+
+  // Recalculate permissions strictly from updated roles
+  const combinedPerms = new Set<string>();
+  for (const r of updatedRoles) {
+    for (const p of getDefaultRolePermissions(r)) {
+      combinedPerms.add(p);
+    }
+  }
+
   const updatedPermissions = Array.isArray(permissions)
     ? permissions
-    : role ? getDefaultRolePermissions(role) : targetUser.permissions;
+    : Array.from(combinedPerms);
 
   let assignedMemberName = targetUser.assignedMemberName;
   if (assignedMemberId) {
@@ -3013,7 +3045,8 @@ router.put('/staff/:id', async (req: AuthenticatedRequest, res: Response) => {
           fullName: fullName !== undefined ? fullName.trim() : u.fullName,
           email: email !== undefined ? email.trim() : u.email,
           phone: phone !== undefined ? phone.trim() : u.phone,
-          role: role || u.role,
+          role: updatedRoles.join(', '),
+          roles: updatedRoles,
           customRoleTitle: customRoleTitle !== undefined ? (customRoleTitle.trim() || undefined) : u.customRoleTitle,
           assignedMemberId: assignedMemberId !== undefined ? (assignedMemberId || undefined) : u.assignedMemberId,
           assignedMemberName: assignedMemberName || u.assignedMemberName,
@@ -3041,7 +3074,7 @@ router.put('/staff/:id', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 // DELETE /api/church/staff/:id - Remove staff member / delete assigned member role
-router.delete('/staff/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/staff/:id', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const staffId = req.params.id;
 

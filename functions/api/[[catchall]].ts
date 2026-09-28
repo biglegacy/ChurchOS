@@ -29,9 +29,24 @@ export const onRequest = async (context: {
   }
 
   // 2. Resolve backend URL from environment or production deployment
-  const rawBackend = env.BACKEND_URL || env.VITE_API_URL || 'https://ais-dev-v5vseiddljyuoccmnf2uvj-444415977811.europe-west3.run.app';
-  const backendBase = rawBackend.replace(/\/$/, '');
+  const rawBackend = env.BACKEND_URL || env.VITE_API_URL || '';
+  if (!rawBackend) {
+    return new Response(
+      JSON.stringify({
+        error: 'Backend API URL is not configured on this Cloudflare deployment. Please set the BACKEND_URL environment variable in your Cloudflare Pages dashboard settings to your deployed Church-OS backend instance.',
+        code: 'BACKEND_URL_MISSING',
+      }),
+      {
+        status: 503,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      }
+    );
+  }
 
+  const backendBase = rawBackend.replace(/\/$/, '');
   const requestUrl = new URL(request.url);
   const targetUrl = `${backendBase}${requestUrl.pathname}${requestUrl.search}`;
 
@@ -48,8 +63,26 @@ export const onRequest = async (context: {
       method: request.method,
       headers: forwardHeaders,
       body,
-      redirect: 'follow',
+      redirect: 'manual', // Do not automatically follow internal login redirects
     });
+
+    // Check if target backend returned a redirect to internal Google OAuth/login
+    const location = response.headers.get('Location');
+    if (response.status >= 300 && response.status < 400 && location && location.includes('accounts.google.com')) {
+      return new Response(
+        JSON.stringify({
+          error: 'Backend requires Google Cloud authentication. Please configure a publicly accessible backend instance or set BACKEND_URL appropriately.',
+          code: 'BACKEND_AUTH_REQUIRED',
+        }),
+        {
+          status: 502,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        }
+      );
+    }
 
     const responseHeaders = new Headers(response.headers);
     responseHeaders.set('Access-Control-Allow-Origin', request.headers.get('Origin') || '*');

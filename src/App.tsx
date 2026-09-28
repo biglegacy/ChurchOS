@@ -64,6 +64,16 @@ export default function App() {
     verifyAuth();
   }, []);
 
+  const refreshAuthData = async () => {
+    try {
+      const res = await ApiClient.get('/api/auth/me');
+      if (res.user) setUser(res.user);
+      if (res.church) setChurch(res.church);
+    } catch {
+      // Ignore background refresh errors
+    }
+  };
+
   const handleLoginSuccess = (loggedInUser: User, loggedInChurch: Church | null, redirectTo: string) => {
     setUser(loggedInUser);
     setChurch(loggedInChurch);

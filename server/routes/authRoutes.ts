@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db, hashPassword, User, Church, getDefaultRolePermissions } from '../db';
-import { createToken, requireAuth, AuthenticatedRequest } from '../auth';
+import { createToken, requireAuth, AuthenticatedRequest, getUserPermissions } from '../auth';
 import { normalizePhoneNumber } from '../smsService';
 
 const router = Router();
@@ -189,7 +189,7 @@ router.post('/login', (req: Request, res: Response) => {
       role: user.role,
       roles: Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : [user.role],
       customRoleTitle: user.customRoleTitle,
-      permissions: user.permissions && user.permissions.length > 0 ? user.permissions : (user.roles ? computePermissionsForRoles(user.roles) : getDefaultRolePermissions(user.role)),
+      permissions: getUserPermissions(user),
       churchId: user.churchId,
       status: user.status,
       isPrimaryAccount: Boolean(user.isPrimaryAccount),
@@ -213,7 +213,7 @@ router.post('/login', (req: Request, res: Response) => {
 });
 
 // POST /api/auth/register-church
-router.post('/register-church', (req: Request, res: Response) => {
+router.post('/register-church', async (req: Request, res: Response) => {
   const {
     churchName,
     name,
@@ -458,7 +458,7 @@ router.get('/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
       role: req.user.role,
       roles: Array.isArray(req.user.roles) && req.user.roles.length > 0 ? req.user.roles : [req.user.role],
       customRoleTitle: req.user.customRoleTitle,
-      permissions: req.user.permissions && req.user.permissions.length > 0 ? req.user.permissions : (req.user.roles ? computePermissionsForRoles(req.user.roles) : getDefaultRolePermissions(req.user.role)),
+      permissions: getUserPermissions(req.user),
       churchId: req.user.churchId,
       phone: req.user.phone,
       status: req.user.status,

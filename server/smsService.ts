@@ -1576,16 +1576,28 @@ export class SmsService {
   public static async testChurchGatewayConnection(params: {
     churchId: string;
     gateway?: string;
-    apiKey: string;
+    apiKey?: string;
     senderId?: string;
     testPhone: string;
   }): Promise<{ success: boolean; message: string; details?: any }> {
     const { churchId, apiKey, senderId, testPhone } = params;
-    const cleanKey = (apiKey || '').trim();
+    const platformSettings = db.get('platformSettings');
+    const churches = db.get('churches');
+    const church = churches.find(c => c.id === churchId);
+
+    const cleanKey = (
+      apiKey ||
+      church?.settings?.smsApiKey ||
+      (church?.settings as any)?.apiKey ||
+      platformSettings?.apiKey ||
+      process.env.ARKESEL_API_KEY ||
+      ''
+    ).trim();
+
     if (!cleanKey) {
       return {
         success: false,
-        message: 'SMS Gateway API key is required. Please enter an API key to test.',
+        message: 'Platform SMS Gateway is not configured. The Super Administrator can configure the Arkesel API key in the central platform settings.',
       };
     }
 
@@ -1597,8 +1609,6 @@ export class SmsService {
       };
     }
 
-    const churches = db.get('churches');
-    const church = churches.find(c => c.id === churchId);
     const churchName = church?.name || 'Church';
     const effectiveSender = (senderId || deriveSenderIdFromChurchName(churchName)).slice(0, 11);
     const cleanPhone = norm.normalized.replace(/^\+/, '');

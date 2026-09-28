@@ -14,11 +14,8 @@ async function startServer() {
   // Ensure Vite client transport doesn't crash when WebSocket is unavailable in iframe
   patchViteClient();
 
-  // Wait for Firestore to establish connection and load collections
-  await db.ready;
-
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const httpServer = http.createServer(app);
 
   // Trust reverse proxies (Cloudflare, Cloud Run, load balancers)
@@ -50,9 +47,20 @@ async function startServer() {
     next();
   });
 
-  // Health check
+  // Health check - instant response for platform liveness check
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', service: 'Church-OS', timestamp: new Date().toISOString() });
+  });
+
+  // Ensure Firestore connection is ready before handling operational API routes
+  app.use('/api', async (_req: Request, _res: Response, next: NextFunction) => {
+    try {
+      await db.ready;
+      next();
+    } catch (dbErr) {
+      console.error('[DB Initialization Error on Request]', dbErr);
+      next(dbErr);
+    }
   });
 
   // Mount API Endpoints FIRST
@@ -81,6 +89,7 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
+        hmr: false,
       },
       appType: 'spa',
     });

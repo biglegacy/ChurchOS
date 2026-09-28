@@ -37,6 +37,7 @@ interface StaffMember {
   email: string;
   phone?: string;
   role: ChurchStaffRole | string;
+  roles?: string[];
   customRoleTitle?: string;
   assignedMemberId?: string;
   assignedMemberName?: string;
@@ -57,15 +58,99 @@ interface ChurchMemberOption {
   phone?: string;
 }
 
-const STANDARD_ROLES: Array<{ role: ChurchStaffRole; label: string; description: string }> = [
-  { role: 'ACCOUNTANT', label: 'Accountant', description: 'Access to financial ledgers, tithes, income, expenses and audit statements.' },
-  { role: 'PASTOR', label: 'Pastor', description: 'Full access to congregation records, spiritual care, attendance consistency and communications.' },
-  { role: 'ASSISTANT_PASTOR', label: 'Assistant Pastor', description: 'Assists with pastoral visits, counseling, services and member follow-ups.' },
-  { role: 'TREASURER', label: 'Treasurer', description: 'Authorized custodian for church receipts, tithes and bank allocations.' },
-  { role: 'SECRETARY', label: 'Secretary', description: 'Oversees membership records, incoming visitors, event calendar and notices.' },
-  { role: 'FINANCE_OFFICER', label: 'Finance Officer', description: 'Receives and logs tithes, special contributions and verifies receipts.' },
-  { role: 'ADMINISTRATOR', label: 'Administrator', description: 'Full administrative operational access to all church management modules.' },
-  { role: 'CUSTOM', label: 'Custom Role', description: 'Church-defined custom designation with customized feature permissions.' },
+interface StandardRoleDefinition {
+  role: ChurchStaffRole;
+  label: string;
+  description: string;
+  permissions: ChurchPermission[];
+}
+
+const STANDARD_ROLES: StandardRoleDefinition[] = [
+  {
+    role: 'ACCOUNTANT',
+    label: 'Accountant',
+    description: 'Financial ledgers, tithes, income, expenses & accounting statements.',
+    permissions: ['view_dashboard', 'manage_giving'],
+  },
+  {
+    role: 'ATTENDANCE_OFFICER',
+    label: 'Attendance Officer',
+    description: 'Service check-ins, congregation roll calls & attendance monitoring.',
+    permissions: ['view_dashboard', 'manage_attendance'],
+  },
+  {
+    role: 'MEMBER_MANAGER',
+    label: 'Member Manager',
+    description: 'Congregation member directory, families & membership records.',
+    permissions: ['view_dashboard', 'manage_members'],
+  },
+  {
+    role: 'SMS_MANAGER',
+    label: 'SMS Manager',
+    description: 'SMS broadcast dispatch, congregation announcements & delivery reports.',
+    permissions: ['view_dashboard', 'send_sms'],
+  },
+  {
+    role: 'PASTOR',
+    label: 'Pastor',
+    description: 'Pastoral counseling, members, services attendance, visitors & events.',
+    permissions: ['view_dashboard', 'manage_pastoral', 'manage_members', 'manage_attendance', 'manage_visitors', 'manage_events'],
+  },
+  {
+    role: 'TREASURER',
+    label: 'Treasurer',
+    description: 'Authorized custodian for church receipts, collections & finances.',
+    permissions: ['view_dashboard', 'manage_giving'],
+  },
+  {
+    role: 'FINANCE_OFFICER',
+    label: 'Finance Officer',
+    description: 'Receives and logs tithes, special contributions & finance records.',
+    permissions: ['view_dashboard', 'manage_giving'],
+  },
+  {
+    role: 'SECRETARY',
+    label: 'Secretary',
+    description: 'Church records, member registers, visitors, calendar notices & SMS.',
+    permissions: ['view_dashboard', 'manage_members', 'manage_attendance', 'manage_visitors', 'manage_events', 'send_sms'],
+  },
+  {
+    role: 'EVENT_COORDINATOR',
+    label: 'Event Coordinator',
+    description: 'Church calendar, program logistics & ministry task tracking.',
+    permissions: ['view_dashboard', 'manage_events', 'manage_tasks'],
+  },
+  {
+    role: 'DEPARTMENT_LEADER',
+    label: 'Department Leader',
+    description: 'Department structure, member rosters, attendance & group events.',
+    permissions: ['view_dashboard', 'manage_departments', 'manage_attendance', 'manage_events'],
+  },
+  {
+    role: 'ADMINISTRATOR',
+    label: 'Administrator',
+    description: 'Full operational access across all church operations modules.',
+    permissions: [
+      'view_dashboard',
+      'manage_members',
+      'manage_attendance',
+      'send_sms',
+      'manage_giving',
+      'manage_visitors',
+      'manage_pastoral',
+      'manage_departments',
+      'manage_events',
+      'manage_tasks',
+      'manage_staff',
+      'manage_settings',
+    ],
+  },
+  {
+    role: 'CUSTOM',
+    label: 'Custom Role',
+    description: 'Church-defined designation with specific custom permissions.',
+    permissions: ['view_dashboard'],
+  },
 ];
 
 const PERMISSION_METADATA: Record<ChurchPermission, { label: string; category: string }> = {

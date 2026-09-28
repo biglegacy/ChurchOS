@@ -1,2 +1,4 @@
 # Cloudflare Pages SPA Routing
-/*    /index.html   200
+# Ensure API routes are handled by Cloudflare Functions / backend proxy
+/api/*  /api/:splat   200
+/*      /index.html   200

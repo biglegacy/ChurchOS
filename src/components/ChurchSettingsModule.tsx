@@ -180,7 +180,6 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
         settings: {
           currency: formData.currency,
           smsGateway: formData.smsGateway,
-          smsApiKey: formData.smsApiKey.trim(),
           smsSenderId: formData.smsSenderId.toUpperCase().slice(0, 11),
           smsEnabled: formData.smsEnabled,
           manualSmsEnabled: formData.manualSmsEnabled,
@@ -224,7 +223,6 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
       setTestResult(null);
 
       const res = await ApiClient.post('/api/church/sms/test-connection', {
-        apiKey: formData.smsApiKey.trim(),
         senderId: formData.smsSenderId.trim(),
         testPhone: testPhone.trim(),
         gateway: formData.smsGateway,
@@ -412,29 +410,22 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
               </p>
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Gateway API Key
-              </label>
-              <div className="relative">
-                <input
-                  type={showApiKey ? 'text' : 'password'}
-                  value={formData.smsApiKey}
-                  onChange={e => setFormData({ ...formData, smsApiKey: e.target.value })}
-                  placeholder="Enter church API key (or leave empty to use platform pool)"
-                  className="w-full pl-3 pr-8 py-2 border border-slate-200 rounded-md font-mono text-xs focus:outline-none focus:border-teal-700"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="absolute right-2 top-2 text-slate-400 hover:text-slate-600"
-                  title={showApiKey ? 'Hide Key' : 'Show Key'}
-                >
-                  {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
+            {/* SMS Balance & Allocation Card */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700">SMS Units & Platform Gateway</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  (church?.smsCredits ?? 0) > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                }`}>
+                  {church?.smsStatus || 'ACTIVE'}
+                </span>
+              </div>
+              <div className="mt-2 flex items-baseline space-x-2">
+                <span className="text-2xl font-black text-teal-900">{church?.smsCredits ?? 0}</span>
+                <span className="text-xs text-slate-500 font-medium">available units</span>
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
-                Stored securely on server. Never exposed to regular members.
+                Centralized carrier routing and API keys are managed by Platform Super Admin. Units are allocated per church.
               </p>
             </div>
           </div>
