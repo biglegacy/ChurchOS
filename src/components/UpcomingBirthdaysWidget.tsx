@@ -286,11 +286,6 @@ export const UpcomingBirthdaysWidget: React.FC<Props> = ({
                       <div>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-bold text-slate-900 text-sm">{member.fullName}</span>
-                          {member.age && (
-                            <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
-                              {member.isToday ? `Turning ${member.age}` : `${member.age} yrs`}
-                            </span>
-                          )}
                         </div>
 
                         <div className="flex items-center gap-2 text-xs text-slate-500 mt-1 flex-wrap">

@@ -52,7 +52,7 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
     // SMS Gateway & Authentication Settings (Requirement 4)
     smsGateway: church?.settings?.smsGateway || 'Arkesel',
     smsApiKey: church?.settings?.smsApiKey || '',
-    smsSenderId: church?.settings?.smsSenderId || 'CHURCH-OS',
+    smsSenderId: church?.settings?.senderName || church?.settings?.smsSenderId || (church?.name ? church.name.slice(0, 11) : ''),
     smsEnabled: church?.settings?.smsEnabled ?? true,
     manualSmsEnabled: church?.settings?.manualSmsEnabled ?? true,
     autoContributionSms: church?.settings?.autoContributionSms ?? true,
@@ -180,7 +180,8 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
         settings: {
           currency: formData.currency,
           smsGateway: formData.smsGateway,
-          smsSenderId: formData.smsSenderId.toUpperCase().slice(0, 11),
+          smsSenderId: formData.smsSenderId.trim().slice(0, 11),
+          senderName: formData.smsSenderId.trim().slice(0, 11),
           smsEnabled: formData.smsEnabled,
           manualSmsEnabled: formData.manualSmsEnabled,
           autoContributionSms: formData.autoContributionSms,
@@ -394,19 +395,18 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
 
             <div>
               <label className="block font-semibold text-slate-700 mb-1">
-                Approved SMS Sender ID (Max 11 chars)
+                SMS Sender Name (Max 11 characters)
               </label>
               <input
                 type="text"
                 maxLength={11}
-                required
                 value={formData.smsSenderId}
-                onChange={e => setFormData({ ...formData, smsSenderId: e.target.value.toUpperCase().slice(0, 11) })}
-                placeholder="CHURCH-OS"
+                onChange={e => setFormData({ ...formData, smsSenderId: e.target.value.slice(0, 11) })}
+                placeholder={church?.name ? church.name.slice(0, 11) : 'Sender Name'}
                 className="w-full px-3 py-2 border border-slate-200 rounded-md font-mono uppercase font-bold text-teal-800 tracking-wider focus:outline-none focus:border-teal-700"
               />
-              <p className="text-[10px] text-slate-400 mt-1">
-                Displays on members' phones as the verified sender header.
+              <p className="text-[10px] text-slate-500 mt-1">
+                Recipients see this name when receiving SMS from your church. If left blank, the first 11 characters of your registered church name ("{church?.name ? church.name.slice(0, 11) : ''}") will be used by default.
               </p>
             </div>
 

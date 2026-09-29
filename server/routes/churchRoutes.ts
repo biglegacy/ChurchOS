@@ -23,9 +23,11 @@ import {
   CustomRole,
   PREDEFINED_ROLES,
   getPredefinedRolePermissions,
+  getChurchPredefinedRoles,
+  PredefinedRoleDefinition,
 } from '../db';
 import { requireAuth, enforceTenant, requirePermission, AuthenticatedRequest, getUserPermissions } from '../auth';
-import { SmsService, normalizePhoneNumber } from '../smsService';
+import { SmsService, normalizePhoneNumber, deriveSenderIdFromChurchName } from '../smsService';
 
 const router = Router();
 
@@ -148,8 +150,6 @@ export function calculateUpcomingBirthdays(members: Member[], churchId: string, 
     const matchedDay = weekDays.find(w => w.month === birthMonth && w.day === birthDay);
     if (!matchedDay) continue;
 
-    const age = birthYear ? todayYear - birthYear : undefined;
-
     const alreadySentToday = smsMessages.some(sms =>
       sms.churchId === churchId &&
       sms.notificationType === 'BIRTHDAY_GREETING' &&
@@ -168,7 +168,6 @@ export function calculateUpcomingBirthdays(members: Member[], churchId: string, 
       isToday: matchedDay.isToday,
       isTomorrow: matchedDay.isTomorrow,
       daysDiff: matchedDay.daysDiff,
-      age,
       gender: member.gender,
       departmentIds: member.departmentIds || [],
       alreadySentToday,
@@ -409,7 +408,7 @@ router.post('/birthdays/send-greeting', async (req: AuthenticatedRequest, res: R
     failed,
     totalTargeted: targetMembers.length,
     message: sent > 0
-      ? `Automated birthday greeting SMS sent to ${sent} celebrant(s) via registered sender ID "${church.settings.senderName || church.name.slice(0, 11).toUpperCase()}".`
+      ? `Automated birthday greeting SMS sent to ${sent} celebrant(s) via registered sender name "${deriveSenderIdFromChurchName(church.name, church.settings?.senderName || church.settings?.smsSenderId)}".`
       : 'Failed to dispatch birthday SMS.',
     results,
   });
@@ -2840,6 +2839,8 @@ router.put('/settings', requirePermission('settings:edit'), async (req: Authenti
           settings: {
             ...c.settings,
             ...(settings || {}),
+            senderName: (settings?.senderName !== undefined ? settings.senderName : (settings?.smsSenderId !== undefined ? settings.smsSenderId : c.settings?.senderName || '')).trim().slice(0, 11),
+            smsSenderId: (settings?.smsSenderId !== undefined ? settings.smsSenderId : (settings?.senderName !== undefined ? settings.senderName : c.settings?.smsSenderId || '')).trim().slice(0, 11),
           },
           updatedAt: new Date().toISOString(),
         };
@@ -2860,9 +2861,209 @@ router.put('/settings', requirePermission('settings:edit'), async (req: Authenti
 
 // ================= CHURCH STAFF & CUSTOM ROLES (Requirements 1 - 11) ================= //
 
-// GET /api/church/predefined-roles - List the 15 available predefined roles with their permissions
-router.get('/predefined-roles', (req: AuthenticatedRequest, res: Response) => {
-  res.json(PREDEFINED_ROLES);
+// GET /api/church/predefined-roles - List predefined roles with effective church configuration
+router.get('/predefined-roles', requirePermission('staff'), (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const activeRoles = getChurchPredefinedRoles(churchId);
+  const users = db.get('users').filter(u => u.churchId === churchId);
+
+  const rolesWithCount = activeRoles.map(r => {
+    const assignedCount = users.filter(u =>
+      (Array.isArray(u.roles) && (u.roles.includes(r.name) || u.roles.includes(r.key) || u.roles.includes(r.label))) ||
+      u.role === r.name ||
+      u.role === r.key
+    ).length;
+    return {
+      ...r,
+      assignedStaffCount: assignedCount,
+    };
+  });
+
+  res.json(rolesWithCount);
+});
+
+// PUT /api/church/predefined-roles/:key - Edit predefined role permissions, name, or description
+router.put('/predefined-roles/:key', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const roleKey = req.params.key;
+  const church = db.get('churches').find(c => c.id === churchId);
+  if (!church) {
+    res.status(404).json({ error: 'Church record not found.' });
+    return;
+  }
+
+  // Ensure church has its own predefined roles array initialized
+  if (!church.settings) church.settings = {} as any;
+  if (!Array.isArray(church.settings.predefinedRoles) || church.settings.predefinedRoles.length === 0) {
+    church.settings.predefinedRoles = JSON.parse(JSON.stringify(PREDEFINED_ROLES));
+  }
+
+  const targetRole = church.settings.predefinedRoles.find(
+    r => r.key.toLowerCase() === roleKey.toLowerCase() ||
+         r.name.toLowerCase() === roleKey.toLowerCase() ||
+         r.label.toLowerCase() === roleKey.toLowerCase()
+  );
+
+  if (!targetRole) {
+    res.status(404).json({ error: `Predefined role "${roleKey}" not found for this church.` });
+    return;
+  }
+
+  const { name, description, permissions } = req.body;
+
+  if (name && name.trim()) {
+    targetRole.name = name.trim();
+    targetRole.label = name.trim();
+  }
+  if (description !== undefined) {
+    targetRole.description = description.trim();
+  }
+  if (Array.isArray(permissions)) {
+    if (permissions.length === 0) {
+      res.status(400).json({ error: 'At least one permission must be selected for the role.' });
+      return;
+    }
+    // Save EXACTLY the selected permissions - no silent additions or removals
+    targetRole.permissions = Array.from(new Set(permissions));
+  }
+
+  await db.saveDoc('churches', churchId, church).catch(console.error);
+
+  // Recalculate effective permissions for all users in this church assigned to this role
+  const affectedStaff = db.get('users').filter(u =>
+    u.churchId === churchId &&
+    (u.roles?.includes(targetRole.name) || u.roles?.includes(targetRole.key) || u.role === targetRole.name || u.role === targetRole.key)
+  );
+
+  for (const staff of affectedStaff) {
+    staff.permissions = getUserPermissions(staff, churchId);
+    await db.saveDoc('users', staff.id, staff).catch(console.error);
+  }
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: 'PREDEFINED_ROLE_UPDATED',
+      details: `Updated predefined role "${targetRole.name}". Saved ${targetRole.permissions.length} explicit permission(s). Effective permissions updated for ${affectedStaff.length} staff member(s).`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({
+    success: true,
+    message: `Role "${targetRole.name}" updated successfully. Permissions updated immediately for all assigned staff.`,
+    predefinedRole: targetRole,
+  });
+});
+
+// DELETE /api/church/predefined-roles/:key - Delete a predefined role from this church
+router.delete('/predefined-roles/:key', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const roleKey = req.params.key;
+  const church = db.get('churches').find(c => c.id === churchId);
+  if (!church) {
+    res.status(404).json({ error: 'Church record not found.' });
+    return;
+  }
+
+  if (!church.settings) church.settings = {} as any;
+  if (!Array.isArray(church.settings.predefinedRoles) || church.settings.predefinedRoles.length === 0) {
+    church.settings.predefinedRoles = JSON.parse(JSON.stringify(PREDEFINED_ROLES));
+  }
+
+  const roleIndex = church.settings.predefinedRoles.findIndex(
+    r => r.key.toLowerCase() === roleKey.toLowerCase() ||
+         r.name.toLowerCase() === roleKey.toLowerCase() ||
+         r.label.toLowerCase() === roleKey.toLowerCase()
+  );
+
+  if (roleIndex === -1) {
+    res.status(404).json({ error: `Predefined role "${roleKey}" not found.` });
+    return;
+  }
+
+  const [deletedRole] = church.settings.predefinedRoles.splice(roleIndex, 1);
+  await db.saveDoc('churches', churchId, church).catch(console.error);
+
+  // Unassign role from all staff members who had it and recalculate permissions immediately
+  const affectedStaff = db.get('users').filter(u =>
+    u.churchId === churchId &&
+    (u.roles?.includes(deletedRole.name) || u.roles?.includes(deletedRole.key) || u.role === deletedRole.name || u.role === deletedRole.key)
+  );
+
+  for (const staff of affectedStaff) {
+    staff.roles = (staff.roles || []).filter(r => r !== deletedRole.name && r !== deletedRole.key && r !== deletedRole.label);
+    if (staff.role === deletedRole.name || staff.role === deletedRole.key) {
+      staff.role = staff.roles[0] || 'CUSTOM';
+    }
+    staff.permissions = getUserPermissions(staff, churchId);
+    await db.saveDoc('users', staff.id, staff).catch(console.error);
+  }
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: 'PREDEFINED_ROLE_DELETED',
+      details: `Deleted predefined role "${deletedRole.name}". Unassigned from ${affectedStaff.length} staff member(s) and revoked effective permissions immediately.`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({
+    success: true,
+    message: `Predefined role "${deletedRole.name}" deleted successfully. Role unassigned from all staff and permissions recalculated.`,
+  });
+});
+
+// POST /api/church/predefined-roles/reset - Restore standard predefined roles
+router.post('/predefined-roles/reset', requirePermission('staff'), async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const church = db.get('churches').find(c => c.id === churchId);
+  if (!church) {
+    res.status(404).json({ error: 'Church record not found.' });
+    return;
+  }
+
+  if (!church.settings) church.settings = {} as any;
+  church.settings.predefinedRoles = JSON.parse(JSON.stringify(PREDEFINED_ROLES));
+  await db.saveDoc('churches', churchId, church).catch(console.error);
+
+  // Recalculate staff permissions
+  const churchStaff = db.get('users').filter(u => u.churchId === churchId);
+  for (const staff of churchStaff) {
+    staff.permissions = getUserPermissions(staff, churchId);
+    await db.saveDoc('users', staff.id, staff).catch(console.error);
+  }
+
+  // Audit log
+  db.update('auditLogs', logs => [
+    {
+      id: `aud_${Date.now()}`,
+      churchId,
+      userId: req.user?.id || 'admin',
+      userName: req.user?.fullName || 'Administrator',
+      action: 'PREDEFINED_ROLES_RESET',
+      details: `Restored standard predefined roles to system defaults. Recalculated permissions for ${churchStaff.length} staff accounts.`,
+      timestamp: new Date().toISOString(),
+    },
+    ...logs.slice(0, 499),
+  ]);
+
+  res.json({
+    success: true,
+    message: 'Standard predefined roles restored to default permissions.',
+    predefinedRoles: church.settings.predefinedRoles,
+  });
 });
 
 // GET /api/church/custom-roles - List all custom roles created by this church

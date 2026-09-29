@@ -83,11 +83,12 @@ interface AuditLogEntry {
 }
 
 export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
-  // Navigation Tabs: 'staff' | 'custom_roles' | 'audit_logs'
-  const [activeTab, setActiveTab] = useState<'staff' | 'custom_roles' | 'audit_logs'>('staff');
+  // Navigation Tabs: 'staff' | 'predefined_roles' | 'custom_roles' | 'audit_logs'
+  const [activeTab, setActiveTab] = useState<'staff' | 'predefined_roles' | 'custom_roles' | 'audit_logs'>('staff');
 
   // Main data states
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
+  const [predefinedRoles, setPredefinedRoles] = useState<PredefinedRoleDefinition[]>([]);
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [congregationMembers, setCongregationMembers] = useState<ChurchMemberOption[]>([]);
@@ -137,6 +138,16 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
   const [customRoleDescription, setCustomRoleDescription] = useState('');
   const [customRolePermissions, setCustomRolePermissions] = useState<string[]>([]);
 
+  // Predefined Role Modal States
+  const [showPredefinedRoleModal, setShowPredefinedRoleModal] = useState(false);
+  const [editingPredefinedRole, setEditingPredefinedRole] = useState<PredefinedRoleDefinition | null>(null);
+  const [submittingPredefinedRole, setSubmittingPredefinedRole] = useState(false);
+  const [predefinedRoleToDelete, setPredefinedRoleToDelete] = useState<PredefinedRoleDefinition | null>(null);
+  const [isDeletingPredefinedRole, setIsDeletingPredefinedRole] = useState(false);
+  const [predefinedRoleName, setPredefinedRoleName] = useState('');
+  const [predefinedRoleDescription, setPredefinedRoleDescription] = useState('');
+  const [predefinedRolePermissions, setPredefinedRolePermissions] = useState<string[]>([]);
+
   // Load all church staff
   const loadStaff = async () => {
     try {
@@ -144,6 +155,16 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
       setStaffList(Array.isArray(res) ? res : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load church staff.');
+    }
+  };
+
+  // Load church predefined roles
+  const loadPredefinedRoles = async () => {
+    try {
+      const res = await ApiClient.get('/api/church/predefined-roles');
+      setPredefinedRoles(Array.isArray(res) ? res : []);
+    } catch {
+      // Non-blocking
     }
   };
 
@@ -189,7 +210,7 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
 
   const loadAllData = async () => {
     setLoading(true);
-    await Promise.all([loadStaff(), loadCustomRoles(), loadAuditLogs(), loadMembers()]);
+    await Promise.all([loadStaff(), loadPredefinedRoles(), loadCustomRoles(), loadAuditLogs(), loadMembers()]);
     setLoading(false);
   };
 
@@ -203,7 +224,11 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
     customRolesMap[cr.id] = cr.permissions;
     customRolesMap[cr.name] = cr.permissions;
   }
-  const previewEffectivePermissions = getCombinedPermissionsForRoles(formSelectedRoles, customRolesMap);
+  const previewEffectivePermissions = getCombinedPermissionsForRoles(
+    formSelectedRoles,
+    customRolesMap,
+    predefinedRoles.length > 0 ? predefinedRoles : undefined
+  );
 
   // Toggle role in staff form
   const toggleRoleSelection = (roleIdentifier: string) => {
@@ -458,6 +483,100 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
     }
   };
 
+  // Open Predefined Role Edit Modal
+  const openEditPredefinedRoleModal = (role: PredefinedRoleDefinition) => {
+    setEditingPredefinedRole(role);
+    setPredefinedRoleName(role.name || role.label);
+    setPredefinedRoleDescription(role.description || '');
+    setPredefinedRolePermissions(Array.isArray(role.permissions) ? [...role.permissions] : []);
+    setShowPredefinedRoleModal(true);
+  };
+
+  const togglePredefinedRolePermission = (perm: string) => {
+    setPredefinedRolePermissions(prev =>
+      prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]
+    );
+  };
+
+  const togglePredefinedCategoryPermissions = (catPerms: string[]) => {
+    const allSelected = catPerms.every(p => predefinedRolePermissions.includes(p));
+    if (allSelected) {
+      setPredefinedRolePermissions(prev => prev.filter(p => !catPerms.includes(p)));
+    } else {
+      setPredefinedRolePermissions(prev => Array.from(new Set([...prev, ...catPerms])));
+    }
+  };
+
+  // Submit Edit Predefined Role
+  const handleSubmitPredefinedRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPredefinedRole) return;
+    if (!predefinedRoleName.trim()) {
+      setError('Role name is required.');
+      return;
+    }
+    if (predefinedRolePermissions.length === 0) {
+      setError('At least one permission must be selected for the role.');
+      return;
+    }
+
+    try {
+      setSubmittingPredefinedRole(true);
+      setError(null);
+
+      const payload = {
+        name: predefinedRoleName.trim(),
+        description: predefinedRoleDescription.trim(),
+        permissions: predefinedRolePermissions,
+      };
+
+      await ApiClient.put(`/api/church/predefined-roles/${editingPredefinedRole.key}`, payload);
+      setNotice(`Role "${payload.name}" updated successfully with ${predefinedRolePermissions.length} explicit permission(s). Effective permissions updated for all assigned staff.`);
+      setShowPredefinedRoleModal(false);
+      setEditingPredefinedRole(null);
+      await loadPredefinedRoles();
+      await loadStaff();
+      await loadAuditLogs();
+    } catch (err: any) {
+      setError(err.message || 'Failed to update predefined role.');
+    } finally {
+      setSubmittingPredefinedRole(false);
+    }
+  };
+
+  // Delete Predefined Role
+  const handleConfirmDeletePredefinedRole = async () => {
+    if (!predefinedRoleToDelete) return;
+    try {
+      setIsDeletingPredefinedRole(true);
+      setError(null);
+      await ApiClient.delete(`/api/church/predefined-roles/${predefinedRoleToDelete.key}`);
+      setNotice(`Predefined role "${predefinedRoleToDelete.name}" deleted and revoked from all assigned accounts.`);
+      setPredefinedRoleToDelete(null);
+      await loadPredefinedRoles();
+      await loadStaff();
+      await loadAuditLogs();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete predefined role.');
+    } finally {
+      setIsDeletingPredefinedRole(false);
+    }
+  };
+
+  // Reset Predefined Roles to defaults
+  const handleResetPredefinedRoles = async () => {
+    try {
+      setError(null);
+      await ApiClient.post('/api/church/predefined-roles/reset');
+      setNotice('Standard predefined roles restored to system defaults.');
+      await loadPredefinedRoles();
+      await loadStaff();
+      await loadAuditLogs();
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset standard roles.');
+    }
+  };
+
   // Filtered staff list
   const churchAccounts = (staffList || []).filter(s => s.isPrimaryAccount || s.accountType === 'CHURCH_ACCOUNT');
   const assignedRoles = (staffList || []).filter(s => !s.isPrimaryAccount && s.accountType !== 'CHURCH_ACCOUNT');
@@ -579,7 +698,10 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
           </p>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+        <div
+          onClick={() => setActiveTab('predefined_roles')}
+          className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs cursor-pointer hover:border-teal-400 transition"
+        >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
               Predefined Roles
@@ -589,10 +711,10 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
             </div>
           </div>
           <div className="mt-2 text-2xl font-black text-slate-900">
-            {PREDEFINED_ROLES.length}
+            {(predefinedRoles.length > 0 ? predefinedRoles : PREDEFINED_ROLES).length}
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            15 built-in standardized roles
+            Standard customizable church roles
           </p>
         </div>
       </div>
@@ -622,11 +744,11 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
       )}
 
       {/* Main Tabs Navigation */}
-      <div className="flex items-center space-x-2 border-b border-slate-200">
+      <div className="flex items-center space-x-2 border-b border-slate-200 overflow-x-auto pb-1 sm:pb-0">
         <button
           type="button"
           onClick={() => setActiveTab('staff')}
-          className={`pb-3 px-3 text-xs font-bold transition flex items-center space-x-2 border-b-2 cursor-pointer ${
+          className={`pb-3 px-3 text-xs font-bold transition flex items-center space-x-2 border-b-2 cursor-pointer shrink-0 ${
             activeTab === 'staff'
               ? 'border-teal-700 text-teal-900'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -638,8 +760,21 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
 
         <button
           type="button"
+          onClick={() => setActiveTab('predefined_roles')}
+          className={`pb-3 px-3 text-xs font-bold transition flex items-center space-x-2 border-b-2 cursor-pointer shrink-0 ${
+            activeTab === 'predefined_roles'
+              ? 'border-teal-700 text-teal-900'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Shield className="w-4 h-4" />
+          <span>Predefined Roles ({(predefinedRoles.length > 0 ? predefinedRoles : PREDEFINED_ROLES).length})</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('custom_roles')}
-          className={`pb-3 px-3 text-xs font-bold transition flex items-center space-x-2 border-b-2 cursor-pointer ${
+          className={`pb-3 px-3 text-xs font-bold transition flex items-center space-x-2 border-b-2 cursor-pointer shrink-0 ${
             activeTab === 'custom_roles'
               ? 'border-teal-700 text-teal-900'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -887,7 +1022,118 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
         </div>
       )}
 
-      {/* TAB 2: CUSTOM ROLES MANAGEMENT */}
+      {/* TAB 2: PREDEFINED ROLES MANAGEMENT */}
+      {activeTab === 'predefined_roles' && (
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="font-bold text-sm text-slate-900">Standard Predefined Church Roles</h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200">
+                  {(predefinedRoles.length > 0 ? predefinedRoles : PREDEFINED_ROLES).length} Standard Roles
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Standard roles can be customized to match your church structure. You can edit their permissions or delete roles you do not use.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleResetPredefinedRoles}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center space-x-1.5 transition cursor-pointer shrink-0"
+              title="Reset all standard roles to initial system permissions"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Reset Standard Roles</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {(predefinedRoles.length > 0 ? predefinedRoles : PREDEFINED_ROLES).map(role => (
+              <div
+                key={role.key}
+                className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between hover:border-teal-300 transition"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-8 h-8 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center font-bold text-xs">
+                        <Shield className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900">{role.name || role.label}</h4>
+                        <span className="text-[10px] text-teal-700 font-semibold bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                          {role.category || 'Standard Role'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-1">
+                      <button
+                        type="button"
+                        onClick={() => openEditPredefinedRoleModal(role)}
+                        className="p-1.5 text-slate-500 hover:text-teal-700 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                        title="Edit Role Permissions"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPredefinedRoleToDelete(role)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                        title="Delete Role"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-500 line-clamp-2">
+                    {role.description || 'No description provided.'}
+                  </p>
+
+                  <div className="flex items-center space-x-2 pt-1 text-[11px]">
+                    <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                      {role.permissions?.length || 0} permissions
+                    </span>
+                    <span className="text-slate-400">•</span>
+                    <span className="font-semibold text-slate-600">
+                      {role.assignedStaffCount || 0} staff assigned
+                    </span>
+                  </div>
+
+                  {/* Sample permissions badges */}
+                  <div className="pt-2 flex flex-wrap gap-1">
+                    {(role.permissions || []).slice(0, 5).map(p => (
+                      <span key={p} className="text-[10px] bg-slate-50 text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded">
+                        {p}
+                      </span>
+                    ))}
+                    {(role.permissions || []).length > 5 && (
+                      <span className="text-[10px] text-teal-700 font-bold bg-teal-50 px-1.5 py-0.5 rounded">
+                        +{role.permissions.length - 5} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+                  <span>Predefined Standard Role</span>
+                  <button
+                    type="button"
+                    onClick={() => openEditPredefinedRoleModal(role)}
+                    className="text-teal-700 font-bold hover:underline cursor-pointer"
+                  >
+                    Edit Permissions &rarr;
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: CUSTOM ROLES MANAGEMENT */}
       {activeTab === 'custom_roles' && (
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
@@ -1673,6 +1919,235 @@ export const ChurchStaffModule: React.FC<Props> = ({ church }) => {
                 className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50"
               >
                 {isDeletingStaff ? 'Revoking...' : 'Yes, Revoke & Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* MODAL: EDIT PREDEFINED ROLE                                         */}
+      {/* =================================================================== */}
+      {showPredefinedRoleModal && editingPredefinedRole && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full my-auto text-xs text-left overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 bg-teal-900 text-white flex items-center justify-between">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="font-bold text-base text-white">Edit Predefined Role</h3>
+                  <span className="text-[10px] bg-teal-800 text-teal-200 px-2 py-0.5 rounded border border-teal-700">
+                    {editingPredefinedRole.category || 'Standard Role'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-teal-200 mt-0.5">
+                  Customize permissions for "{editingPredefinedRole.name}". Changes apply immediately to all assigned staff.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPredefinedRoleModal(false)}
+                className="text-teal-200 hover:text-white p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitPredefinedRole} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">
+                    Role Display Name <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={predefinedRoleName}
+                    onChange={e => setPredefinedRoleName(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-teal-700 text-xs font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Role Description</label>
+                  <input
+                    type="text"
+                    value={predefinedRoleDescription}
+                    onChange={e => setPredefinedRoleDescription(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-teal-700 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Explicit Permissions Catalog */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                  <div>
+                    <label className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                      Explicit Permission Assignment
+                    </label>
+                    <span className="text-[11px] text-slate-500">
+                      Select exactly the functions and modules this role is allowed to access (including Dashboard).
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <span className="font-bold text-xs text-teal-900 bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200">
+                      {predefinedRolePermissions.length} selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const all: string[] = [];
+                        PERMISSION_CATEGORIES_CATALOG.forEach(c => c.actions.forEach(a => all.push(a.permission)));
+                        setPredefinedRolePermissions(all);
+                      }}
+                      className="text-xs text-teal-800 font-bold hover:underline cursor-pointer"
+                    >
+                      Select All
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setPredefinedRolePermissions([])}
+                      className="text-xs text-slate-500 font-bold hover:underline cursor-pointer"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {PERMISSION_CATEGORIES_CATALOG.map(category => {
+                    const catPerms = category.actions.map(a => a.permission);
+                    const selectedCount = catPerms.filter(p => predefinedRolePermissions.includes(p)).length;
+                    const allSelected = selectedCount === catPerms.length;
+
+                    return (
+                      <div
+                        key={category.id}
+                        className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 hover:border-slate-300 transition"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-bold text-xs text-slate-900">{category.name}</span>
+                            <span className="text-[10px] text-slate-500 ml-2">{category.description}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => togglePredefinedCategoryPermissions(catPerms)}
+                            className="text-[11px] font-bold text-teal-700 hover:underline cursor-pointer"
+                          >
+                            {allSelected ? 'Deselect Category' : 'Select All in Category'}
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {category.actions.map(action => {
+                            const isChecked = predefinedRolePermissions.includes(action.permission);
+                            return (
+                              <label
+                                key={action.permission}
+                                className={`flex items-center space-x-2 p-2 rounded-lg cursor-pointer border transition text-left ${
+                                  isChecked
+                                    ? 'bg-teal-50 border-teal-300 text-teal-950 font-medium'
+                                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => togglePredefinedRolePermission(action.permission)}
+                                  className="rounded text-teal-700 focus:ring-teal-600 cursor-pointer"
+                                />
+                                <span className="text-[11px] font-semibold">{action.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Submit / Cancel */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowPredefinedRoleModal(false)}
+                  disabled={submittingPredefinedRole}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-50 font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingPredefinedRole}
+                  className="px-5 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {submittingPredefinedRole ? (
+                    <span>Updating Role Permissions...</span>
+                  ) : (
+                    <span>Save Role Permissions</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* MODAL: DELETE PREDEFINED ROLE CONFIRMATION                          */}
+      {/* =================================================================== */}
+      {predefinedRoleToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden text-xs text-left animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-rose-950">Delete Predefined Role</h3>
+                  <p className="text-[11px] text-rose-600">Role will be removed from church catalog</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPredefinedRoleToDelete(null)}
+                disabled={isDeletingPredefinedRole}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              <p className="text-slate-700 leading-relaxed text-xs">
+                Are you sure you want to delete the predefined role <strong className="text-slate-900 font-bold">"{predefinedRoleToDelete.name || predefinedRoleToDelete.label}"</strong>?
+              </p>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px]">
+                <strong>Warning:</strong> Any staff member who has this role assigned will immediately have it removed from their account, and their effective permissions will be recalculated immediately.
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setPredefinedRoleToDelete(null)}
+                disabled={isDeletingPredefinedRole}
+                className="px-4 py-2 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeletePredefinedRole}
+                disabled={isDeletingPredefinedRole}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingPredefinedRole ? 'Deleting...' : 'Yes, Delete Role'}
               </button>
             </div>
           </div>

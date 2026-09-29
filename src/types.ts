@@ -55,11 +55,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   DEPARTMENT_LEADER: ['dashboard', 'departments', 'attendance', 'events'],
   GROUP_LEADER: ['dashboard', 'departments', 'attendance', 'events'],
   MEMBER: ['portal'],
-  CUSTOM: ['dashboard'],
+  CUSTOM: [],
 };
 
 export function getDefaultRolePermissions(role: string): string[] {
-  return DEFAULT_ROLE_PERMISSIONS[role] || ['dashboard'];
+  return DEFAULT_ROLE_PERMISSIONS[role] || [];
 }
 
 export type ChurchPermission =
@@ -648,13 +648,18 @@ export const PREDEFINED_ROLES: PredefinedRoleDefinition[] = [
   },
 ];
 
-export function getCombinedPermissionsForRoles(roles: string[], customRolesMap?: Record<string, string[]>): string[] {
-  if (!roles || roles.length === 0) return ['dashboard:view'];
+export function getCombinedPermissionsForRoles(
+  roles: string[],
+  customRolesMap?: Record<string, string[]>,
+  predefinedRolesList?: PredefinedRoleDefinition[]
+): string[] {
+  if (!roles || roles.length === 0) return [];
   const combined = new Set<string>();
+  const activePredefined = predefinedRolesList || PREDEFINED_ROLES;
 
   for (const r of roles) {
     const cleanR = r.trim().toLowerCase();
-    const predefined = PREDEFINED_ROLES.find(
+    const predefined = activePredefined.find(
       pr => pr.name.toLowerCase() === cleanR ||
             pr.key.toLowerCase() === cleanR ||
             pr.label.toLowerCase() === cleanR
@@ -818,6 +823,7 @@ export interface Church {
     customExpenseCategories?: string[];
     customDepartmentCategories?: string[];
     customPastoralCategories?: string[];
+    predefinedRoles?: PredefinedRoleDefinition[];
     contributionSmsTemplate?: string;
     absenceSmsEnabled: boolean;
     absenceSmsDelayMinutes: number;
@@ -1149,7 +1155,6 @@ export interface MemberBirthday {
   isToday: boolean;
   isTomorrow: boolean;
   daysDiff: number;
-  age?: number;
   gender: 'Male' | 'Female';
   departmentIds?: string[];
   alreadySentToday?: boolean;

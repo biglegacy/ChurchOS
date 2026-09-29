@@ -1,3 +1,5 @@
+import { toFriendlyErrorMessage } from './utils/friendlyError';
+
 const TOKEN_KEY = 'church_os_auth_token';
 const USER_KEY = 'church_os_auth_user';
 const CHURCH_KEY = 'church_os_auth_church';
@@ -86,25 +88,16 @@ export class ApiClient {
         await new Promise(r => setTimeout(r, 400));
         return this.request<T>(endpoint, options, retries - 1);
       }
-      throw new Error(
-        networkErr?.message === 'Failed to fetch'
-          ? 'Unable to connect to Church-OS server. Please check your network connection and retry.'
-          : (networkErr?.message || 'Network request failed.')
-      );
+      console.error('[API Network Error]', endpoint, networkErr);
+      throw new Error(toFriendlyErrorMessage(networkErr, endpoint));
     }
 
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      let errorMsg = data.error || data.message;
-      if (!errorMsg) {
-        if (res.status === 405) {
-          errorMsg = 'Method Not Allowed (405). The server or Cloudflare endpoint rejected the request method. Check API route routing.';
-        } else {
-          errorMsg = `Request failed with status ${res.status}`;
-        }
-      }
-      const err: any = new Error(errorMsg);
+      console.error(`[API Error ${res.status}]`, endpoint, data);
+      const friendly = toFriendlyErrorMessage({ status: res.status, message: data.error || data.message }, endpoint);
+      const err: any = new Error(friendly);
       err.status = res.status;
       err.code = data.code;
       err.details = data.details;

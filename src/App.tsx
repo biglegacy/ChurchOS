@@ -22,6 +22,7 @@ import { MemberPortalView } from './components/MemberPortalView';
 import { ChurchStaffModule } from './components/ChurchStaffModule';
 import { MembersProvider } from './context/MembersContext';
 import { hasPermission } from './types';
+import { AccessDeniedScreen } from './components/AccessDeniedScreen';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(ApiClient.getUser());
@@ -30,16 +31,23 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
-  const determineInitialTab = (u: User) => {
+  const determineInitialTab = (u: User | null): string => {
+    if (!u) return 'dashboard';
     if (u.role === 'SUPER_ADMIN') return 'sa-dashboard';
     if (u.role === 'MEMBER') return 'portal';
     if (hasPermission(u, 'view_dashboard')) return 'dashboard';
-    if (hasPermission(u, 'manage_giving')) return 'giving';
     if (hasPermission(u, 'manage_members')) return 'members';
     if (hasPermission(u, 'manage_attendance')) return 'attendance';
-    if (hasPermission(u, 'send_sms')) return 'sms';
+    if (hasPermission(u, 'manage_giving')) return 'giving';
+    if (hasPermission(u, 'manage_visitors')) return 'visitors';
     if (hasPermission(u, 'manage_pastoral')) return 'pastoral';
-    return 'dashboard';
+    if (hasPermission(u, 'manage_departments')) return 'departments';
+    if (hasPermission(u, 'manage_events')) return 'events';
+    if (hasPermission(u, 'manage_tasks')) return 'tasks';
+    if (hasPermission(u, 'send_sms')) return 'sms';
+    if (hasPermission(u, 'manage_staff')) return 'staff';
+    if (hasPermission(u, 'manage_settings')) return 'settings';
+    return 'no-access';
   };
 
   useEffect(() => {
@@ -171,63 +179,216 @@ export default function App() {
             <MembersProvider churchId={church?.id}>
               <div>
                 {activeTab === 'dashboard' && (
-                  <ChurchDashboard
-                    church={church}
-                    onNavigateTab={tab => setActiveTab(tab)}
-                    onQuickAction={handleQuickAction}
-                  />
+                  hasPermission(user, 'view_dashboard') ? (
+                    <ChurchDashboard
+                      church={church}
+                      onNavigateTab={tab => setActiveTab(tab)}
+                      onQuickAction={handleQuickAction}
+                    />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Dashboard"
+                      requiredPermission="dashboard:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'members' && (
-                  <MembersModule
-                    church={church}
-                    onRecordGivingForMember={() => setActiveTab('giving')}
-                  />
+                  hasPermission(user, 'manage_members') ? (
+                    <MembersModule
+                      church={church}
+                      onRecordGivingForMember={() => setActiveTab('giving')}
+                    />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Members Directory"
+                      requiredPermission="members:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'attendance' && (
-                  <AttendanceModule />
+                  hasPermission(user, 'manage_attendance') ? (
+                    <AttendanceModule />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Attendance & Services"
+                      requiredPermission="attendance:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'giving' && (
-                  <GivingModule church={church} />
+                  hasPermission(user, 'manage_giving') ? (
+                    <GivingModule church={church} />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Finance & Giving"
+                      requiredPermission="giving:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'visitors' && (
-                  <VisitorsModule />
+                  hasPermission(user, 'manage_visitors') ? (
+                    <VisitorsModule />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Visitors & Converts"
+                      requiredPermission="visitors:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'pastoral' && (
-                  <PastoralModule />
+                  hasPermission(user, 'manage_pastoral') ? (
+                    <PastoralModule />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Pastoral Care"
+                      requiredPermission="pastoral:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'departments' && (
-                  <DepartmentsModule />
+                  hasPermission(user, 'manage_departments') ? (
+                    <DepartmentsModule />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Departments & Cells"
+                      requiredPermission="departments:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'events' && (
-                  <EventsModule onNavigateTab={tab => setActiveTab(tab)} />
+                  hasPermission(user, 'manage_events') ? (
+                    <EventsModule onNavigateTab={tab => setActiveTab(tab)} />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Events & Calendar"
+                      requiredPermission="events:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'tasks' && (
-                  <TasksModule />
+                  hasPermission(user, 'manage_tasks') ? (
+                    <TasksModule />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Ministry Tasks"
+                      requiredPermission="tasks:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'sms' && (
-                  <SmsModule
-                    church={church}
-                    onNavigateTab={tab => setActiveTab(tab)}
-                  />
+                  hasPermission(user, 'send_sms') ? (
+                    <SmsModule
+                      church={church}
+                      onNavigateTab={tab => setActiveTab(tab)}
+                    />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="SMS Center"
+                      requiredPermission="sms:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'staff' && (
-                  <ChurchStaffModule church={church} />
+                  hasPermission(user, 'manage_staff') ? (
+                    <ChurchStaffModule church={church} />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Staff & Roles Management"
+                      requiredPermission="staff:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
                 )}
 
                 {activeTab === 'settings' && (
-                  <ChurchSettingsModule
-                    church={church}
-                    onUpdateChurch={updated => setChurch(updated)}
+                  hasPermission(user, 'manage_settings') ? (
+                    <ChurchSettingsModule
+                      church={church}
+                      onUpdateChurch={updated => setChurch(updated)}
+                    />
+                  ) : (
+                    <AccessDeniedScreen
+                      moduleName="Church Settings"
+                      requiredPermission="settings:view"
+                      user={user}
+                      fallbackTab={determineInitialTab(user)}
+                      fallbackTabLabel="Your Permitted Module"
+                      onNavigate={tab => setActiveTab(tab)}
+                      onLogout={handleLogout}
+                    />
+                  )
+                )}
+
+                {activeTab === 'no-access' && (
+                  <AccessDeniedScreen
+                    moduleName="Church Modules"
+                    requiredPermission="Any Active Module Permission"
+                    user={user}
+                    onLogout={handleLogout}
                   />
                 )}
               </div>
@@ -248,6 +409,7 @@ export default function App() {
       {/* Bottom Navigation for Mobile (Church Tenants only) */}
       {!isSuperAdmin && !isMember && (
         <BottomNav
+          user={user}
           activeTab={activeTab}
           onSelectTab={tab => setActiveTab(tab)}
           onOpenMore={() => setDrawerOpen(true)}

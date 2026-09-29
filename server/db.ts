@@ -324,12 +324,22 @@ export function normalizeRoleKey(roleStr: string): string {
   return roleStr.toLowerCase().replace(/[\s\/\_\-]+/g, '');
 }
 
-export function getPredefinedRolePermissions(roleName: string): string[] {
+export function getChurchPredefinedRoles(churchId?: string): PredefinedRoleDefinition[] {
+  if (!churchId) return PREDEFINED_ROLES;
+  const church = db.get('churches').find(c => c.id === churchId);
+  if (church?.settings?.predefinedRoles && Array.isArray(church.settings.predefinedRoles)) {
+    return church.settings.predefinedRoles;
+  }
+  return PREDEFINED_ROLES;
+}
+
+export function getPredefinedRolePermissions(roleName: string, churchId?: string): string[] {
   if (!roleName) return [];
   const normalized = normalizeRoleKey(roleName);
+  const activeRoles = getChurchPredefinedRoles(churchId);
   
-  // Direct match against predefined roles
-  for (const r of PREDEFINED_ROLES) {
+  // Direct match against active predefined roles
+  for (const r of activeRoles) {
     if (
       normalizeRoleKey(r.name) === normalized ||
       normalizeRoleKey(r.key) === normalized ||
@@ -339,30 +349,36 @@ export function getPredefinedRolePermissions(roleName: string): string[] {
     }
   }
 
+  // If church customized their predefined roles list and deleted this role, do not alias or fallback!
+  const church = churchId ? db.get('churches').find(c => c.id === churchId) : null;
+  if (church?.settings?.predefinedRoles && Array.isArray(church.settings.predefinedRoles)) {
+    return []; // Role was explicitly deleted by the church
+  }
+
   // Alias legacy role names
   if (normalized === 'accountant' || normalized === 'financeofficer') {
-    return PREDEFINED_ROLES.find(r => r.key === 'ACCOUNTS_OFFICER')?.permissions || [];
+    return activeRoles.find(r => r.key === 'ACCOUNTS_OFFICER')?.permissions || [];
   }
   if (normalized === 'smsmanager') {
-    return PREDEFINED_ROLES.find(r => r.key === 'COMMUNICATION_OFFICER')?.permissions || [];
+    return activeRoles.find(r => r.key === 'COMMUNICATION_OFFICER')?.permissions || [];
   }
   if (normalized === 'attendanceofficer') {
-    return PREDEFINED_ROLES.find(r => r.key === 'USHER')?.permissions || [];
+    return activeRoles.find(r => r.key === 'USHER')?.permissions || [];
   }
   if (normalized === 'membermanager') {
-    return PREDEFINED_ROLES.find(r => r.key === 'SECRETARY')?.permissions || [];
+    return activeRoles.find(r => r.key === 'SECRETARY')?.permissions || [];
   }
   if (normalized === 'groupleader') {
-    return PREDEFINED_ROLES.find(r => r.key === 'DEPARTMENT_LEADER')?.permissions || [];
+    return activeRoles.find(r => r.key === 'DEPARTMENT_LEADER')?.permissions || [];
   }
   if (normalized === 'seniorpastor' || normalized === 'assistantpastor' || normalized === 'pastorminister') {
-    return PREDEFINED_ROLES.find(r => r.key === 'PASTOR')?.permissions || [];
+    return activeRoles.find(r => r.key === 'PASTOR')?.permissions || [];
   }
   if (normalized === 'eventcoordinator') {
     return ['dashboard:view', 'events:view', 'events:create', 'events:edit'];
   }
   if (normalized === 'viewer' || normalized === 'readonly') {
-    return PREDEFINED_ROLES.find(r => r.key === 'VIEWER_READ_ONLY')?.permissions || [];
+    return activeRoles.find(r => r.key === 'VIEWER_READ_ONLY')?.permissions || [];
   }
 
   // Fallback to legacy dictionary if found
@@ -408,13 +424,13 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   VIEWER_READ_ONLY: PREDEFINED_ROLES.find(r => r.key === 'VIEWER_READ_ONLY')!.permissions,
   'Viewer/Read Only': PREDEFINED_ROLES.find(r => r.key === 'VIEWER_READ_ONLY')!.permissions,
   MEMBER: ['portal'],
-  CUSTOM: ['dashboard:view'],
+  CUSTOM: [],
 };
 
-export function getDefaultRolePermissions(role: string): string[] {
-  const perms = getPredefinedRolePermissions(role);
+export function getDefaultRolePermissions(role: string, churchId?: string): string[] {
+  const perms = getPredefinedRolePermissions(role, churchId);
   if (perms && perms.length > 0) return perms;
-  return DEFAULT_ROLE_PERMISSIONS[role] || ['dashboard:view'];
+  return DEFAULT_ROLE_PERMISSIONS[role] || [];
 }
 
 export interface Church {
@@ -467,6 +483,7 @@ export interface Church {
     customExpenseCategories?: string[];
     customDepartmentCategories?: string[];
     customPastoralCategories?: string[];
+    predefinedRoles?: PredefinedRoleDefinition[];
     contributionSmsTemplate?: string;
     absenceSmsEnabled: boolean;
     absenceSmsDelayMinutes: number;

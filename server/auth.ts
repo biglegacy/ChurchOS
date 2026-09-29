@@ -169,8 +169,8 @@ export function getUserPermissions(user: User, churchId?: string): string[] {
     : [];
 
   for (const roleItem of rawRoles) {
-    // 1. Check predefined roles
-    const predefinedPerms = getPredefinedRolePermissions(roleItem);
+    // 1. Check predefined roles (scoped to church's customized or deleted predefined roles)
+    const predefinedPerms = getPredefinedRolePermissions(roleItem, effectiveChurchId);
     if (predefinedPerms.length > 0) {
       for (const p of predefinedPerms) combined.add(p);
     }

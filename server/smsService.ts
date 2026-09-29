@@ -217,23 +217,27 @@ export interface SendSmsResult {
 
 /**
  * Derives a compliant GSM alphanumeric sender ID (max 11 chars) from registered church name.
- * Each church automatically uses its own registered church name from Firebase.
+ * 1. If the church has configured a custom SMS sender name, it takes top priority (max 11 chars).
+ * 2. If no custom sender name is configured, automatically use the first 11 characters of the registered church name.
+ * Examples:
+ * - "Greater Grace International Church" -> "Greater Gra"
+ * - "Victory Chapel Ghana" -> "Victory Cha"
+ * - Custom "GGIC" -> "GGIC"
+ * Never uses admin email, user name, "ChurchOS", or technical system names.
  */
 export function deriveSenderIdFromChurchName(churchName: string, configuredSender?: string): string {
-  // If church has a custom approved sender name in its settings, respect it
-  if (configuredSender && configuredSender.trim().length >= 3) {
-    const cleaned = configuredSender.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11);
-    if (cleaned.length >= 3) return cleaned;
+  // Custom SMS sender name takes priority
+  if (configuredSender && configuredSender.trim()) {
+    const custom = configuredSender.trim().slice(0, 11);
+    if (custom.length > 0) return custom;
   }
 
-  // Derive directly from the official registered church name in Firebase
-  const alphanumeric = churchName.replace(/[^a-zA-Z0-9]/g, '');
-  if (alphanumeric.length >= 3) {
-    return alphanumeric.slice(0, 11);
+  // Default: first 11 characters of the registered church name
+  if (churchName && churchName.trim()) {
+    return churchName.trim().slice(0, 11);
   }
 
-  // Fallback if needed
-  return (churchName.replace(/[^a-zA-Z0-9]/g, '') || 'CHURCH').padEnd(3, '1').slice(0, 11);
+  return 'Church';
 }
 
 /**
