@@ -77,6 +77,11 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
     titheReminderTemplate:
       church?.settings?.titheReminderTemplate ||
       'Greetings [Member Name]. Honor the Lord with your tithes and offerings (Malachi 3:10). God bless you abundantly.',
+    birthdaySmsEnabled: church?.settings?.birthdaySmsEnabled ?? true,
+    birthdaySmsTemplate:
+      church?.settings?.birthdaySmsTemplate ||
+      'Happy Birthday, [Member Name]! 🎉 We celebrate the grace and goodness of God upon your life today. May your new year be crowned with divine favour, joy, and peace! Have a glorious celebration. 🎂',
+    timezone: church?.settings?.timezone || 'Africa/Accra',
   });
 
   const [customTypeInput, setCustomTypeInput] = useState('');
@@ -133,6 +138,12 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
               data.settings?.titheReminderFrequency || prev.titheReminderFrequency,
             titheReminderTemplate:
               data.settings?.titheReminderTemplate || prev.titheReminderTemplate,
+            birthdaySmsEnabled:
+              data.settings?.birthdaySmsEnabled ?? prev.birthdaySmsEnabled,
+            birthdaySmsTemplate:
+              data.settings?.birthdaySmsTemplate || prev.birthdaySmsTemplate,
+            timezone:
+              data.settings?.timezone || prev.timezone,
           }));
         }
       } catch {
@@ -197,6 +208,9 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
           titheReminderEnabled: formData.titheReminderEnabled,
           titheReminderFrequency: formData.titheReminderFrequency,
           titheReminderTemplate: formData.titheReminderTemplate,
+          birthdaySmsEnabled: formData.birthdaySmsEnabled,
+          birthdaySmsTemplate: formData.birthdaySmsTemplate,
+          timezone: formData.timezone,
         },
       });
 
@@ -708,6 +722,59 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
                   value={formData.titheReminderTemplate}
                   onChange={e => setFormData({ ...formData, titheReminderTemplate: e.target.value })}
                   className="w-full px-3 py-1.5 border border-slate-200 rounded-md text-xs focus:outline-none focus:border-teal-700"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Automated Birthday SMS Greetings */}
+          <div className="pt-4 border-t border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-bold text-slate-800 text-sm">Automatic Birthday SMS Greetings</span>
+                <p className="text-[11px] text-slate-500">
+                  Sends personalized greetings automatically on each member's birthday without requiring manual clicks.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={formData.birthdaySmsEnabled}
+                onChange={e => setFormData({ ...formData, birthdaySmsEnabled: e.target.checked })}
+                className="h-4 w-4 text-teal-700 rounded border-slate-300 focus:ring-teal-600"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block font-semibold text-slate-600 mb-1">Operating Timezone</label>
+                <select
+                  value={formData.timezone}
+                  onChange={e => setFormData({ ...formData, timezone: e.target.value })}
+                  className="w-full px-3 py-1.5 border border-slate-200 rounded-md bg-white text-xs focus:outline-none focus:border-teal-700"
+                >
+                  <option value="Africa/Accra">Africa/Accra (GMT)</option>
+                  <option value="Africa/Lagos">Africa/Lagos (GMT+1)</option>
+                  <option value="Africa/Nairobi">Africa/Nairobi (GMT+3)</option>
+                  <option value="Africa/Johannesburg">Africa/Johannesburg (GMT+2)</option>
+                  <option value="Europe/London">Europe/London (GMT/BST)</option>
+                  <option value="America/New_York">America/New_York (EST/EDT)</option>
+                  <option value="America/Chicago">America/Chicago (CST/CDT)</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
+                  <option value="UTC">UTC (Coordinated Universal Time)</option>
+                </select>
+                <p className="text-[10px] text-slate-400 mt-1">Ensures the birthday check runs on local calendar date.</p>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-600 mb-1">
+                  Birthday SMS Template <span className="text-[10px] text-teal-700 font-normal">(Supports [Member Name], [Church Name])</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={formData.birthdaySmsTemplate}
+                  onChange={e => setFormData({ ...formData, birthdaySmsTemplate: e.target.value })}
+                  className="w-full px-3 py-1.5 border border-slate-200 rounded-md text-xs focus:outline-none focus:border-teal-700"
+                  placeholder="Happy Birthday, [Member Name]! 🎉 ..."
                 />
               </div>
             </div>

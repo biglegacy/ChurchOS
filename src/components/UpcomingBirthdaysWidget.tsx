@@ -40,10 +40,17 @@ export const UpcomingBirthdaysWidget: React.FC<Props> = ({
   const [customGreetingText, setCustomGreetingText] = useState<string>('');
 
   const churchName = church?.name || 'our church';
-  const senderId = church?.settings?.senderName || (church?.name?.replace(/[^a-zA-Z0-9]/g, '').slice(0, 11).toUpperCase() || 'CHURCH');
+  const senderId = church?.settings?.senderName || church?.settings?.smsSenderId || (church?.name ? church.name.slice(0, 11) : 'CHURCH');
 
-  const defaultGreeting = (memberName: string) =>
-    `Happy Birthday, ${memberName}! 🎉 We celebrate the grace and favor of God upon your life today. May this new year overflow with divine blessings, good health, and joy! Have a wonderful celebration. 🎂`;
+  const defaultGreeting = (memberName: string) => {
+    const customTemplate = church?.settings?.birthdaySmsTemplate;
+    if (customTemplate && customTemplate.trim().length > 0) {
+      return customTemplate
+        .replace(/\[Member Name\]/gi, memberName)
+        .replace(/\[Church Name\]/gi, churchName);
+    }
+    return `Happy Birthday, ${memberName}! 🎉 We celebrate the grace and goodness of God upon your life today. May your new year be crowned with divine favour, joy, and peace! Have a glorious celebration. 🎂`;
+  };
 
   const fetchBirthdays = async () => {
     try {

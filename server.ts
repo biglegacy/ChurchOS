@@ -9,6 +9,7 @@ import superAdminRoutes from './server/routes/superAdminRoutes';
 import churchRoutes from './server/routes/churchRoutes';
 import memberRoutes from './server/routes/memberRoutes';
 import webhookRoutes from './server/routes/webhookRoutes';
+import { startBirthdayCron, runDailyBirthdayJob } from './server/birthdayScheduler';
 
 async function startServer() {
   // Ensure Vite client transport doesn't crash when WebSocket is unavailable in iframe
@@ -70,6 +71,27 @@ async function startServer() {
   app.use('/api/member', memberRoutes);
   app.use('/api/webhooks', webhookRoutes);
 
+  // Automated Birthday SMS Server-Side Cron Trigger
+  // Callable by Cloudflare Cron Triggers, external schedulers, or internal automated monitors
+  app.all('/api/cron/birthdays', async (_req: Request, res: Response) => {
+    try {
+      const results = await runDailyBirthdayJob();
+      res.json({
+        success: true,
+        message: 'Daily birthday SMS check completed successfully.',
+        timestamp: new Date().toISOString(),
+        churchesProcessed: results.length,
+        results,
+      });
+    } catch (err: any) {
+      console.error('[Cron Birthday Execution Error]', err);
+      res.status(500).json({
+        success: false,
+        error: 'Automated birthday processing encountered a temporary error and will resume automatically.',
+      });
+    }
+  });
+
   // 404 handler for unhandled API routes
   app.all('/api/*', (_req: Request, res: Response) => {
     res.status(404).json({ error: 'API endpoint not found.' });
@@ -108,6 +130,9 @@ async function startServer() {
     console.log(` Church-OS SaaS Engine running on port ${PORT}`);
     console.log(` Super Admin: su@admin / suadmin123`);
     console.log(`===========================================`);
+
+    // Start background autonomous Birthday SMS scheduler
+    startBirthdayCron();
   });
 }
 

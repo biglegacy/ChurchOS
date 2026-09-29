@@ -494,6 +494,9 @@ export interface Church {
     titheReminderEnabled: boolean;
     titheReminderTemplate: string;
     titheReminderFrequency: 'weekly' | 'monthly' | 'campaign';
+    birthdaySmsEnabled?: boolean;
+    birthdaySmsTemplate?: string;
+    timezone?: string;
   };
   createdAt: string;
   updatedAt?: string;

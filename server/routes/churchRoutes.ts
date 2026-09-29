@@ -28,6 +28,7 @@ import {
 } from '../db';
 import { requireAuth, enforceTenant, requirePermission, AuthenticatedRequest, getUserPermissions } from '../auth';
 import { SmsService, normalizePhoneNumber, deriveSenderIdFromChurchName } from '../smsService';
+import { processChurchBirthdays, getLocalDateForTimezone, DEFAULT_BIRTHDAY_SMS_TEMPLATE } from '../birthdayScheduler';
 
 const router = Router();
 
@@ -153,8 +154,9 @@ export function calculateUpcomingBirthdays(members: Member[], churchId: string, 
     const alreadySentToday = smsMessages.some(sms =>
       sms.churchId === churchId &&
       sms.notificationType === 'BIRTHDAY_GREETING' &&
-      (sms.recipientName === member.fullName || sms.phone === member.phone) &&
-      (sms.sentAt || sms.createdAt || '').startsWith(todayYMD)
+      (sms.memberId === member.id || sms.recipientName === member.fullName || sms.phone === member.phone) &&
+      ((sms.sentAt || sms.createdAt || '').startsWith(todayYMD) || sms.idempotencyKey === `bday_${churchId}_${member.id}_${todayYMD}`) &&
+      (sms.status === 'Delivered' || sms.status === 'Submitted')
     );
 
     result.push({
@@ -328,9 +330,7 @@ router.post('/birthdays/send-greeting', async (req: AuthenticatedRequest, res: R
     }
     targetMembers = [target];
   } else if (sendToAllToday) {
-    const now = new Date();
-    const tMonth = now.getMonth() + 1;
-    const tDate = now.getDate();
+    const { month: tMonth, day: tDate } = getLocalDateForTimezone(church.settings?.timezone, church.country);
 
     targetMembers = members.filter(m => {
       if (!m.dateOfBirth) return false;
@@ -350,20 +350,20 @@ router.post('/birthdays/send-greeting', async (req: AuthenticatedRequest, res: R
     return;
   }
 
-  const defaultGreetingTemplate =
-    "Happy Birthday, [Member Name]! 🎉 We celebrate the grace and goodness of God upon your life today. May your new year be crowned with divine favour, joy, and peace! Have a glorious celebration. 🎂";
+  const configuredTemplate = church.settings?.birthdaySmsTemplate || (church.settings as any)?.birthdayTemplate;
+  const template = customMessage && customMessage.trim().length > 0
+    ? customMessage.trim()
+    : (configuredTemplate && configuredTemplate.trim().length > 0 ? configuredTemplate.trim() : DEFAULT_BIRTHDAY_SMS_TEMPLATE);
 
-  const template = customMessage && customMessage.trim().length > 0 ? customMessage.trim() : defaultGreetingTemplate;
-
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const { dateStr: todayStr } = getLocalDateForTimezone(church.settings?.timezone, church.country);
   let sent = 0;
   let failed = 0;
   const results: any[] = [];
 
   for (const member of targetMembers) {
     const personalizedMessage = template
-      .replace(/\[Member Name\]/g, member.fullName)
-      .replace(/\[Church Name\]/g, church.name);
+      .replace(/\[Member Name\]/gi, member.fullName)
+      .replace(/\[Church Name\]/gi, church.name);
 
     const idempotencyKey = `bday_${churchId}_${member.id}_${todayStr}`;
 
@@ -374,6 +374,7 @@ router.post('/birthdays/send-greeting', async (req: AuthenticatedRequest, res: R
         phone: member.phone,
         message: personalizedMessage,
         notificationType: 'BIRTHDAY_GREETING',
+        memberId: member.id,
         idempotencyKey,
       });
 
@@ -412,6 +413,31 @@ router.post('/birthdays/send-greeting', async (req: AuthenticatedRequest, res: R
       : 'Failed to dispatch birthday SMS.',
     results,
   });
+});
+
+router.post('/birthdays/trigger-automation', async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const church = db.get('churches').find(c => c.id === churchId);
+  if (!church) {
+    res.status(404).json({ error: 'Church not found.' });
+    return;
+  }
+
+  try {
+    const result = await processChurchBirthdays(church);
+    res.json({
+      success: true,
+      message: result.sentNow > 0
+        ? `Automatic birthday check completed: ${result.sentNow} birthday SMS sent.`
+        : (result.skipReason || `Automatic birthday check completed: ${result.alreadySent} already sent, 0 pending today.`),
+      result,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process automatic birthday SMS. Please try again.',
+    });
+  }
 });
 
 // ================= MEMBER MANAGEMENT ================= //

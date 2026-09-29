@@ -834,6 +834,9 @@ export interface Church {
     titheReminderEnabled: boolean;
     titheReminderTemplate: string;
     titheReminderFrequency: 'weekly' | 'monthly';
+    birthdaySmsEnabled?: boolean;
+    birthdaySmsTemplate?: string;
+    timezone?: string;
   };
   createdAt: string;
   memberCount?: number;
