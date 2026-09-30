@@ -148,6 +148,38 @@ if (isDeployCmd) {
       '...effectiveArgs,'
     );
   }
+
+  // Hook process exit to provide clear guidance if Cloudflare API returns authentication error
+  if (!content.includes('// CHURCHOS_EXIT_HANDLER')) {
+    content = content.replace(
+      'wranglerProcess = runWrangler();',
+      `wranglerProcess = runWrangler();
+	// CHURCHOS_EXIT_HANDLER
+	if (wranglerProcess && typeof wranglerProcess.on === 'function') {
+		wranglerProcess.on('exit', (code) => {
+			if (code !== 0 && (process.argv.includes('deploy') || process.argv.includes('pages'))) {
+				console.error('\\n--------------------------------------------------------------------------------');
+				console.error('[ChurchOS Deployment Diagnostic - Authentication Error 10000 Resolution]');
+				console.error('If the error was: "Authentication error [code: 10000]" on /pages/projects/church-os:');
+				console.error('This occurs when the API token in CLOUDFLARE_API_TOKEN lacks "Cloudflare Pages" scope.');
+				console.error('\\nTo fix this in Cloudflare Dashboard:');
+				console.error('1. Navigate to: https://dash.cloudflare.com/profile/api-tokens');
+				console.error('2. Create or Edit the API Token:');
+				console.error('   • Permissions:');
+				console.error('     - Account > Cloudflare Pages > Edit (REQUIRED for Pages deployments)');
+				console.error('     - Account > Account Settings > Read');
+				console.error('     - User > Memberships > Read');
+				console.error('     - User > User Details > Read');
+				console.error('   • Account Resources:');
+				console.error('     - Include > Specific account > 0d4be3e173f3bb506d877491853edc86');
+				console.error('3. Update CLOUDFLARE_API_TOKEN with the new token in your Cloudflare Pages / CI secrets.');
+				console.error('--------------------------------------------------------------------------------\\n');
+			}
+		});
+	}`
+    );
+  }
+
   fs.writeFileSync(wranglerBin, content, 'utf8');
   console.log('[ChurchOS] Successfully configured wrangler for Cloudflare Pages deployment.');
 }
