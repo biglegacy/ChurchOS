@@ -240,7 +240,6 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
       const res = await ApiClient.post('/api/church/sms/test-connection', {
         senderId: formData.smsSenderId.trim(),
         testPhone: testPhone.trim(),
-        gateway: formData.smsGateway,
       });
 
       setTestResult(res);
@@ -377,36 +376,19 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
           </div>
         </div>
 
-        {/* Central SMS Gateway Configuration Card (Requirement 4) */}
+        {/* Safe Church SMS Settings Card (Requirement 2 & 16) */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="text-sm font-bold text-teal-950 flex items-center space-x-2">
               <Key className="w-4 h-4 text-teal-700" />
-              <span>SMS Gateway & API Configuration</span>
+              <span>SMS Sender Name & Messaging Controls</span>
             </h3>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-50 text-teal-800 border border-teal-200">
-              Admin Only Access
+              Church SMS Configuration
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">SMS Gateway Provider</label>
-              <select
-                value={formData.smsGateway}
-                onChange={e => setFormData({ ...formData, smsGateway: e.target.value as any })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-md bg-white focus:outline-none focus:border-teal-700"
-              >
-                <option value="Arkesel">Arkesel SMS Gateway (Ghana / Africa)</option>
-                <option value="Hubtel">Hubtel SMS Gateway (Ghana)</option>
-                <option value="Twilio">Twilio Global Gateway</option>
-                <option value="Standard">Standard HTTP Gateway</option>
-              </select>
-              <p className="text-[10px] text-slate-400 mt-1">
-                Select your preferred carrier route. Defaults to Arkesel for optimal Ghana delivery.
-              </p>
-            </div>
-
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">
                 SMS Sender Name (Max 11 characters)
@@ -427,7 +409,7 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
             {/* SMS Balance & Allocation Card */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">SMS Units & Platform Gateway</span>
+                <span className="text-xs font-bold text-slate-700">SMS Units & Delivery Status</span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                   (church?.smsCredits ?? 0) > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                 }`}>
@@ -439,7 +421,7 @@ export const ChurchSettingsModule: React.FC<Props> = ({ church, onUpdateChurch }
                 <span className="text-xs text-slate-500 font-medium">available units</span>
               </div>
               <p className="text-[10px] text-slate-400 mt-1">
-                Centralized carrier routing and API keys are managed by Platform Super Admin. Units are allocated per church.
+                Carrier routing, provider connectivity, and billing security are managed securely on the server.
               </p>
             </div>
           </div>

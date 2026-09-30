@@ -1422,6 +1422,80 @@ export class SmsService {
   }
 
   /**
+   * Process automated absence follow-up for a specific date (redesigned attendance workflow).
+   * Fully tenant-isolated, safe from duplicates.
+   */
+  public static async processDateAttendanceAbsenceSms(
+    churchId: string,
+    attendanceDate: string,
+    finalizedBy: string
+  ): Promise<{ totalAbsent: number; sent: number; skipped: number }> {
+    const churches = db.get('churches');
+    const church = churches.find(c => c.id === churchId);
+    if (!church) throw new Error('Church not found');
+
+    if (!church.features?.sms || !church.settings?.absenceSmsEnabled || church.smsStatus === 'DISABLED' || church.settings?.smsEnabled === false) {
+      return { totalAbsent: 0, sent: 0, skipped: 0 };
+    }
+
+    // Get attendance records for this date
+    const attendanceRecords = db.get('attendance').filter(
+      a => a.churchId === churchId && (a.date === attendanceDate || a.serviceDate === attendanceDate)
+    );
+    const absentRecords = attendanceRecords.filter(a => a.status === 'Absent');
+
+    let sent = 0;
+    let skipped = 0;
+
+    const template =
+      church.settings?.absenceSmsTemplate ||
+      "Dear [Member Name], we missed you in fellowship today. We hope you are well and look forward to worshipping with you again.";
+
+    for (const record of absentRecords) {
+      const members = db.get('members');
+      const member = members.find(m => m.id === record.memberId && m.churchId === churchId);
+      const memberName = member ? member.fullName : record.memberName;
+      const memberPhone = member ? member.phone : record.memberPhone;
+
+      if (!memberPhone || memberPhone.trim().length < 7) {
+        skipped++;
+        continue;
+      }
+
+      const customizedMessage = template
+        .replace(/\[Member Name\]/gi, memberName)
+        .replace(/\[Church Name\]/gi, church.name)
+        .replace(/\[Service Name\]/gi, 'church fellowship')
+        .trim();
+
+      const idempotencyKey = `absence_${churchId}_${record.memberId}_${attendanceDate}`;
+
+      try {
+        const result = await this.sendSms({
+          churchId,
+          recipientName: memberName,
+          phone: memberPhone,
+          message: customizedMessage,
+          notificationType: 'ABSENCE_FOLLOWUP',
+          memberId: record.memberId,
+          idempotencyKey,
+        });
+
+        if (result.success && !result.alreadySent) {
+          sent++;
+        } else {
+          skipped++;
+        }
+      } catch (err) {
+        console.error(`Failed to send absence SMS to ${memberName}:`, err);
+        skipped++;
+      }
+    }
+
+    return { totalAbsent: absentRecords.length, sent, skipped };
+  }
+
+  /**
    * Automated Contribution Confirmation SMS (Requirements 2, 3, 10)
    * When an enabled contribution is recorded:
    * 1. Check whether church SMS is enabled.

@@ -898,17 +898,18 @@ export interface ChurchService {
 export interface AttendanceRecord {
   id: string;
   churchId: string;
-  serviceId: string;
-  serviceName: string;
-  serviceDate: string;
+  date?: string;
+  serviceId?: string;
+  serviceName?: string;
+  serviceDate?: string;
   memberId: string;
   memberName: string;
-  memberPhone: string;
+  memberPhone?: string;
   status: 'Present' | 'Absent' | 'Excused';
   checkInTime?: string;
-  checkInMethod: 'Manual' | 'QR' | 'Admin';
-  markedBy: string;
-  createdAt: string;
+  checkInMethod?: 'Manual' | 'QR' | 'Admin' | string;
+  markedBy?: string;
+  createdAt?: string;
 }
 
 export type GivingCategoryType =

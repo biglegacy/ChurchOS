@@ -5,6 +5,40 @@ import { normalizePhoneNumber } from '../smsService';
 
 const router = Router();
 
+// In-memory brute-force protection and login rate limiting
+const loginAttempts = new Map<string, { count: number; lockedUntil: number }>();
+
+function getClientIdentifier(req: Request, username: string): string {
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+  return `${ip}_${username.toLowerCase()}`;
+}
+
+function checkLoginRateLimit(key: string): { allowed: boolean; waitMinutes?: number } {
+  const entry = loginAttempts.get(key);
+  if (!entry) return { allowed: true };
+  if (entry.lockedUntil > Date.now()) {
+    const waitMinutes = Math.ceil((entry.lockedUntil - Date.now()) / (60 * 1000));
+    return { allowed: false, waitMinutes };
+  }
+  if (Date.now() > entry.lockedUntil && entry.count >= 5) {
+    loginAttempts.delete(key);
+  }
+  return { allowed: true };
+}
+
+function recordLoginFailure(key: string) {
+  const entry = loginAttempts.get(key) || { count: 0, lockedUntil: 0 };
+  entry.count += 1;
+  if (entry.count >= 5) {
+    entry.lockedUntil = Date.now() + 15 * 60 * 1000; // 15-minute temporary lockout
+  }
+  loginAttempts.set(key, entry);
+}
+
+function clearLoginFailures(key: string) {
+  loginAttempts.delete(key);
+}
+
 // POST /api/auth/login
 router.post('/login', (req: Request, res: Response) => {
   const username = (req.body.username || req.body.email || req.body.identifier || '').trim();
@@ -17,56 +51,47 @@ router.post('/login', (req: Request, res: Response) => {
 
   const trimmedUsername = username.trim();
   const trimmedLower = trimmedUsername.toLowerCase();
-  const hashedPassword = hashPassword(password);
+  const clientKey = getClientIdentifier(req, trimmedLower);
 
-  const users = db.get('users');
-
-  // Check direct user match
-  let user = users.find(
-    u => (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower) &&
-         u.passwordHash === hashedPassword
-  );
-
-  // Super Admin alias & resilience check
-  const superAdminAliases = [
-    'su@admin',
-    'superadmin',
-    'admin',
-    'admin@church-os.com',
-    'superadmin@church-os.com',
-    'ragemagic40@gmail.com',
-  ];
-
-  const isSuperAdminAlias =
-    superAdminAliases.includes(trimmedLower) ||
-    users.some(u => u.role === 'SUPER_ADMIN' && (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower));
-
-  if (!user && isSuperAdminAlias) {
-    let superAdminUser = users.find(u => u.role === 'SUPER_ADMIN') || users.find(u => u.username.toLowerCase() === 'su@admin');
-    if (!superAdminUser) {
-      superAdminUser = {
-        id: 'usr_super_admin_001',
-        username: 'su@admin',
-        email: 'admin@church-os.com',
-        passwordHash: hashedPassword,
-        fullName: 'Super Administrator',
-        role: 'SUPER_ADMIN',
-        status: 'ACTIVE',
-        createdAt: new Date().toISOString(),
-      };
-      db.update('users', list => [...list, superAdminUser!]);
-    } else {
-      // Sync the password hash to the user's input so subsequent direct lookups succeed
-      if (password) {
-        db.update('users', list =>
-          list.map(u => u.id === superAdminUser!.id ? { ...u, passwordHash: hashedPassword, status: 'ACTIVE' } : u)
-        );
-      }
-    }
-    user = superAdminUser;
+  // Check brute-force lockout
+  const rateLimit = checkLoginRateLimit(clientKey);
+  if (!rateLimit.allowed) {
+    res.status(429).json({
+      error: `Too many failed login attempts. For security, access is temporarily locked. Please try again in ${rateLimit.waitMinutes} minute(s).`,
+    });
+    return;
   }
 
-  // Church Administrator lookup by church adminEmail/email
+  const hashedPassword = hashPassword(password);
+  const users = db.get('users');
+
+  // Find user by username or email
+  let user = users.find(
+    u => (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower)
+  );
+
+  // If user found, strictly check password
+  if (user && user.passwordHash !== hashedPassword) {
+    recordLoginFailure(clientKey);
+    // Record security audit
+    db.update('auditLogs', logs => [
+      {
+        id: `aud_${Date.now()}`,
+        churchId: user?.churchId || 'PLATFORM',
+        userId: user?.id,
+        userName: user?.fullName || trimmedUsername,
+        action: 'USER_LOGIN_FAILED',
+        details: `Failed login attempt for user "${trimmedUsername}" (invalid password).`,
+        timestamp: new Date().toISOString(),
+      },
+      ...logs.slice(0, 499),
+    ]);
+
+    res.status(401).json({ error: 'Invalid credentials. Please check your username/email and password.' });
+    return;
+  }
+
+  // If no user found directly, check if church exists by admin email
   if (!user) {
     const churches = db.get('churches');
     const matchedChurch = churches.find(
@@ -75,35 +100,21 @@ router.post('/login', (req: Request, res: Response) => {
     );
 
     if (matchedChurch) {
-      let existingChurchUser = users.find(u => u.churchId === matchedChurch.id && (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower));
-      if (existingChurchUser) {
-        db.update('users', list =>
-          list.map(u => u.id === existingChurchUser!.id ? { ...u, passwordHash: hashedPassword, status: 'ACTIVE' } : u)
-        );
-        user = { ...existingChurchUser, passwordHash: hashedPassword, status: 'ACTIVE' };
-      } else {
-        const newChurchUser = {
-          id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          username: trimmedLower,
-          email: matchedChurch.adminEmail || matchedChurch.email,
-          fullName: matchedChurch.adminName || matchedChurch.seniorPastor || 'Church Administrator',
-          role: 'CHURCH_ADMINISTRATOR' as const,
-          churchId: matchedChurch.id,
-          phone: matchedChurch.adminPhone || matchedChurch.phone,
-          passwordHash: hashedPassword,
-          status: 'ACTIVE' as const,
-          createdAt: new Date().toISOString(),
-        };
-        db.update('users', list => [newChurchUser, ...list]);
-        user = newChurchUser;
+      const churchUser = users.find(u => u.churchId === matchedChurch.id && (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower));
+      if (churchUser && churchUser.passwordHash === hashedPassword) {
+        user = churchUser;
       }
     }
   }
 
-  if (!user) {
+  if (!user || user.passwordHash !== hashedPassword) {
+    recordLoginFailure(clientKey);
     res.status(401).json({ error: 'Invalid credentials. Please check your username/email and password.' });
     return;
   }
+
+  // Reset rate limiting counter on valid credentials
+  clearLoginFailures(clientKey);
 
   if (user.status === 'SUSPENDED') {
     res.status(403).json({ error: 'Your user account has been suspended. Please contact platform support.' });
@@ -501,6 +512,25 @@ router.post('/forgot-password', (req: Request, res: Response) => {
       ? `Password reset instructions have been dispatched to ${email}. If you are a church administrator, please contact your Super Admin if you need urgent account recovery.`
       : 'If an account exists with that email, reset instructions have been dispatched.',
   });
+});
+
+// POST /api/auth/logout - Records logout event and clears session
+router.post('/logout', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  if (req.user) {
+    db.update('auditLogs', logs => [
+      {
+        id: `aud_${Date.now()}`,
+        churchId: req.user?.churchId || 'PLATFORM',
+        userId: req.user?.id,
+        userName: req.user?.fullName || 'User',
+        action: 'USER_LOGOUT',
+        details: `${req.user?.fullName || 'User'} logged out.`,
+        timestamp: new Date().toISOString(),
+      },
+      ...logs.slice(0, 499),
+    ]);
+  }
+  res.json({ success: true, message: 'Logged out successfully.' });
 });
 
 export default router;

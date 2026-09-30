@@ -1003,6 +1003,146 @@ router.post('/services/:id/finalize-attendance', requirePermission('attendance')
   }
 });
 
+// ================= REDESIGNED DATE-BASED ATTENDANCE WORKFLOW ================= //
+// GET /api/church/attendance?date=YYYY-MM-DD - Get attendance records for a specific date
+router.get('/attendance', requirePermission('attendance'), (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const targetDate = ((req.query.date as string) || new Date().toISOString().slice(0, 10)).trim();
+
+  const records = db.get('attendance').filter(
+    a => a.churchId === churchId && (a.date === targetDate || a.serviceDate === targetDate)
+  );
+
+  res.json({
+    date: targetDate,
+    records,
+    total: records.length,
+    presentCount: records.filter(r => r.status === 'Present').length,
+    absentCount: records.filter(r => r.status === 'Absent').length,
+  });
+});
+
+// POST /api/church/attendance - Save/Complete attendance for date, triggers automated absence SMS
+router.post('/attendance', requirePermission('attendance'), async (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const { date, records, triggerAbsenceSms } = req.body;
+
+  const attendanceDate = ((date as string) || new Date().toISOString().slice(0, 10)).trim();
+
+  if (!Array.isArray(records) || records.length === 0) {
+    res.status(400).json({ error: 'Attendance records array is required.' });
+    return;
+  }
+
+  // Validate all members belong to this authenticated church (Strict Tenant Isolation)
+  const allMembers = db.get('members');
+  const churchMembers = allMembers.filter(m => m.churchId === churchId);
+  const validMemberIds = new Set(churchMembers.map(m => m.id));
+
+  for (const r of records) {
+    if (!validMemberIds.has(r.memberId)) {
+      res.status(403).json({ error: 'One or more members do not belong to this church.' });
+      return;
+    }
+    if (r.status !== 'Present' && r.status !== 'Absent') {
+      res.status(400).json({ error: 'Attendance status must be either Present or Absent.' });
+      return;
+    }
+  }
+
+  const now = new Date().toISOString();
+  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const markedBy = req.user?.fullName || 'Church Administrator';
+
+  // Save/Update records in db
+  db.update('attendance', existingList => {
+    // Keep other records not matching this church + date + these members
+    const recordMemberIds = new Set(records.map(r => r.memberId));
+    const filtered = existingList.filter(
+      a => !(a.churchId === churchId && (a.date === attendanceDate || a.serviceDate === attendanceDate) && recordMemberIds.has(a.memberId))
+    );
+
+    const newEntries: AttendanceRecord[] = records.map(r => {
+      const member = churchMembers.find(m => m.id === r.memberId);
+      return {
+        id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        churchId,
+        date: attendanceDate,
+        serviceDate: attendanceDate,
+        memberId: r.memberId,
+        memberName: member ? member.fullName : 'Member',
+        memberPhone: member ? member.phone : '',
+        status: r.status,
+        checkInTime: r.status === 'Present' ? timeStr : '-',
+        checkInMethod: 'Manual',
+        markedBy,
+        createdAt: now,
+      };
+    });
+
+    return [...newEntries, ...filtered];
+  });
+
+  // Handle Automatic Absence SMS if enabled or requested
+  let smsStats = { totalAbsent: 0, sent: 0, skipped: 0 };
+  const shouldSendSms = triggerAbsenceSms !== false;
+
+  if (shouldSendSms) {
+    try {
+      smsStats = await SmsService.processDateAttendanceAbsenceSms(churchId, attendanceDate, markedBy);
+    } catch (smsErr) {
+      console.error('[Attendance Absence SMS Error]', smsErr);
+    }
+  }
+
+  const presentCount = records.filter(r => r.status === 'Present').length;
+  const absentCount = records.filter(r => r.status === 'Absent').length;
+
+  res.json({
+    success: true,
+    message: `Attendance saved successfully for ${records.length} member(s): ${presentCount} present, ${absentCount} absent.` +
+      (smsStats.sent > 0 ? ` ${smsStats.sent} absence follow-up SMS sent.` : ''),
+    date: attendanceDate,
+    stats: {
+      total: records.length,
+      presentCount,
+      absentCount,
+      sms: smsStats,
+    },
+  });
+});
+
+// GET /api/church/attendance/history - Grouped past attendance sessions by date
+router.get('/attendance/history', requirePermission('attendance'), (req: AuthenticatedRequest, res: Response) => {
+  const churchId = getChurchId(req);
+  const attendance = db.get('attendance').filter(a => a.churchId === churchId);
+
+  // Group by date
+  const mapByDate = new Map<string, { present: number; absent: number; total: number; markedBy: string }>();
+
+  for (const a of attendance) {
+    const d = a.date || a.serviceDate || a.createdAt?.slice(0, 10) || 'Unknown Date';
+    const entry = mapByDate.get(d) || { present: 0, absent: 0, total: 0, markedBy: a.markedBy || 'Admin' };
+    if (a.status === 'Present') entry.present++;
+    else if (a.status === 'Absent') entry.absent++;
+    entry.total++;
+    mapByDate.set(d, entry);
+  }
+
+  const history = Array.from(mapByDate.entries())
+    .map(([date, stats]) => ({
+      date,
+      presentCount: stats.present,
+      absentCount: stats.absent,
+      totalCount: stats.total,
+      rate: stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0,
+      markedBy: stats.markedBy,
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  res.json(history);
+});
+
 // ================= TITHES & GIVING ================= //
 const STANDARD_GIVING_TYPES = [
   'Tithe',

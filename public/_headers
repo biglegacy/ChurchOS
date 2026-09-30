@@ -1,4 +1,10 @@
 /*
-  Access-Control-Allow-Origin: *
-  Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
-  Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept, Authorization
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+/api/*
+  Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate
+  X-Content-Type-Options: nosniff

@@ -607,7 +607,7 @@ export interface ChurchService {
 export interface AttendanceRecord {
   id: string;
   churchId: string;
-  serviceId: string;
+  serviceId?: string;
   serviceName?: string;
   serviceDate?: string;
   memberId: string;
