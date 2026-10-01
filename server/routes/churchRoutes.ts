@@ -3041,6 +3041,10 @@ router.get('/settings', requirePermission('settings'), (req: AuthenticatedReques
     res.status(404).json({ error: 'Church not found' });
     return;
   }
+  const safeSettings = church.settings ? { ...church.settings } : undefined;
+  if (safeSettings) {
+    delete safeSettings.smsApiKey;
+  }
   res.json({
     churchName: church.name,
     email: church.email,
@@ -3050,7 +3054,7 @@ router.get('/settings', requirePermission('settings'), (req: AuthenticatedReques
     region: church.region,
     country: church.country,
     seniorPastor: church.seniorPastor,
-    settings: church.settings,
+    settings: safeSettings,
     features: church.features,
     subscription: church.subscription,
   });
@@ -3068,6 +3072,9 @@ router.put('/settings', requirePermission('settings:edit'), async (req: Authenti
   }
 
   // Prevent church admins from modifying Super-Admin only fields (Requirement 1 & 7)
+  const sanitizedSettings = { ...(settings || {}) };
+  delete sanitizedSettings.smsApiKey;
+
   const sanitizedBasicInfo = { ...(basicInfo || {}) };
   delete sanitizedBasicInfo.smsCredits;
   delete sanitizedBasicInfo.smsAllocatedUnits;
@@ -3084,9 +3091,9 @@ router.put('/settings', requirePermission('settings:edit'), async (req: Authenti
           ...sanitizedBasicInfo,
           settings: {
             ...c.settings,
-            ...(settings || {}),
-            senderName: (settings?.senderName !== undefined ? settings.senderName : (settings?.smsSenderId !== undefined ? settings.smsSenderId : c.settings?.senderName || '')).trim().slice(0, 11),
-            smsSenderId: (settings?.smsSenderId !== undefined ? settings.smsSenderId : (settings?.senderName !== undefined ? settings.senderName : c.settings?.smsSenderId || '')).trim().slice(0, 11),
+            ...sanitizedSettings,
+            senderName: (sanitizedSettings?.senderName !== undefined ? sanitizedSettings.senderName : (sanitizedSettings?.smsSenderId !== undefined ? sanitizedSettings.smsSenderId : c.settings?.senderName || '')).trim().slice(0, 11),
+            smsSenderId: (sanitizedSettings?.smsSenderId !== undefined ? sanitizedSettings.smsSenderId : (sanitizedSettings?.senderName !== undefined ? sanitizedSettings.senderName : c.settings?.smsSenderId || '')).trim().slice(0, 11),
           },
           updatedAt: new Date().toISOString(),
         };

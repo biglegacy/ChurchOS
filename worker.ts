@@ -32,7 +32,13 @@ export default {
 
     // Serve static assets with automatic SPA fallback
     if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
+      const assetResponse = await env.ASSETS.fetch(request);
+      // If direct asset fetch returned 404 for a client-side navigation GET request, serve index.html
+      if (assetResponse.status === 404 && request.method === 'GET' && !url.pathname.includes('.')) {
+        const indexRequest = new Request(new URL('/', request.url), request);
+        return env.ASSETS.fetch(indexRequest);
+      }
+      return assetResponse;
     }
 
     return new Response('Not Found', { status: 404 });
