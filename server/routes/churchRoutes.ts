@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import {
   db,
   Member,
@@ -26,7 +26,7 @@ import {
   getChurchPredefinedRoles,
   PredefinedRoleDefinition,
 } from '../db';
-import { requireAuth, enforceTenant, requirePermission, AuthenticatedRequest, getUserPermissions } from '../auth';
+import { requireAuth, enforceTenant, requirePermission, AuthenticatedRequest, getUserPermissions, hasPermission } from '../auth';
 import { SmsService, normalizePhoneNumber, deriveSenderIdFromChurchName } from '../smsService';
 import { processChurchBirthdays, getLocalDateForTimezone, DEFAULT_BIRTHDAY_SMS_TEMPLATE } from '../birthdayScheduler';
 
@@ -441,7 +441,27 @@ router.post('/birthdays/trigger-automation', async (req: AuthenticatedRequest, r
 });
 
 // ================= MEMBER MANAGEMENT ================= //
-router.get('/members', requirePermission('members'), (req: AuthenticatedRequest, res: Response) => {
+router.get('/members', (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required. Please log in.' });
+    return;
+  }
+  if (
+    hasPermission(req.user, 'members') ||
+    hasPermission(req.user, 'members:view') ||
+    hasPermission(req.user, 'giving') ||
+    hasPermission(req.user, 'attendance') ||
+    hasPermission(req.user, 'sms') ||
+    hasPermission(req.user, 'pastoral') ||
+    hasPermission(req.user, 'events') ||
+    hasPermission(req.user, 'dashboard')
+  ) {
+    return next();
+  }
+  res.status(403).json({
+    error: 'You do not have permission to view church members. Please contact your church administrator.',
+  });
+}, (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { search, status, gender, departmentId } = req.query;
 
@@ -690,7 +710,25 @@ router.post('/families', requirePermission('members'), (req: AuthenticatedReques
 });
 
 // ================= VISITORS ================= //
-router.get('/visitors', requirePermission('visitors'), (req: AuthenticatedRequest, res: Response) => {
+router.get('/visitors', (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required. Please log in.' });
+    return;
+  }
+  if (
+    hasPermission(req.user, 'visitors') ||
+    hasPermission(req.user, 'visitors:view') ||
+    hasPermission(req.user, 'evangelism') ||
+    hasPermission(req.user, 'sms') ||
+    hasPermission(req.user, 'pastoral') ||
+    hasPermission(req.user, 'dashboard')
+  ) {
+    return next();
+  }
+  res.status(403).json({
+    error: 'You do not have permission to view church visitors. Please contact your church administrator.',
+  });
+}, (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const visitors = db.get('visitors').filter(v => v.churchId === churchId);
   res.json(visitors);
@@ -824,8 +862,28 @@ const getConvertsHandler = (req: AuthenticatedRequest, res: Response) => {
   const converts = db.get('newConverts').filter(c => c.churchId === churchId);
   res.json(converts);
 };
-router.get('/converts', requirePermission('visitors'), getConvertsHandler);
-router.get('/visitors/converts', requirePermission('visitors'), getConvertsHandler);
+const verifyConvertsAccess = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required. Please log in.' });
+    return;
+  }
+  if (
+    hasPermission(req.user, 'visitors') ||
+    hasPermission(req.user, 'visitors:view') ||
+    hasPermission(req.user, 'evangelism') ||
+    hasPermission(req.user, 'sms') ||
+    hasPermission(req.user, 'pastoral') ||
+    hasPermission(req.user, 'dashboard')
+  ) {
+    return next();
+  }
+  res.status(403).json({
+    error: 'You do not have permission to view new converts. Please contact your church administrator.',
+  });
+};
+
+router.get('/converts', verifyConvertsAccess, getConvertsHandler);
+router.get('/visitors/converts', verifyConvertsAccess, getConvertsHandler);
 
 const createConvertHandler = (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
@@ -1922,7 +1980,29 @@ router.post('/department-categories', requirePermission('departments:create'), a
   });
 });
 
-router.get('/departments', requirePermission('departments'), (req: AuthenticatedRequest, res: Response) => {
+router.get('/departments', (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required. Please log in.' });
+    return;
+  }
+  if (
+    hasPermission(req.user, 'departments') ||
+    hasPermission(req.user, 'departments:view') ||
+    hasPermission(req.user, 'members') ||
+    hasPermission(req.user, 'members:view') ||
+    hasPermission(req.user, 'sms') ||
+    hasPermission(req.user, 'attendance') ||
+    hasPermission(req.user, 'events') ||
+    hasPermission(req.user, 'giving') ||
+    hasPermission(req.user, 'pastoral') ||
+    hasPermission(req.user, 'dashboard')
+  ) {
+    return next();
+  }
+  res.status(403).json({
+    error: 'You do not have permission to view church departments. Please contact your church administrator.',
+  });
+}, (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const departments = db.get('departments').filter(d => d.churchId === churchId);
   res.json(departments);

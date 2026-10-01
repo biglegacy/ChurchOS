@@ -76,8 +76,11 @@ export const MembersProvider: React.FC<ProviderProps> = ({ children, churchId })
         setMembers([]);
       }
     } catch (err: any) {
-      console.error('Failed to load registered members from central database:', err);
-      setError(err.message || 'Failed to load members.');
+      console.warn('Could not load registered members for current role context:', err?.message || err);
+      setMembers([]);
+      if (err?.status !== 403 && !String(err?.message || '').toLowerCase().includes('permission')) {
+        setError(err.message || 'Failed to load members.');
+      }
     } finally {
       setLoading(false);
     }

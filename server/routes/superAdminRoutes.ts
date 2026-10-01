@@ -33,9 +33,9 @@ router.get('/dashboard', (_req: AuthenticatedRequest, res: Response) => {
   const failedSms = smsMessages.filter(s => s.status === 'Failed' || s.status === 'Unable to Send').length;
 
   // Subscriptions & Revenue
-  const activeSubscriptions = churches.filter(c => c.subscription.status === 'ACTIVE').length;
-  const expiringSubscriptions = churches.filter(c => c.subscription.status === 'EXPIRING').length;
-  const totalSubscriptionRevenueGHS = churches.reduce((sum, c) => sum + (c.subscription.priceGHS || 0), 0);
+  const activeSubscriptions = churches.filter(c => c.subscription?.status === 'ACTIVE').length;
+  const expiringSubscriptions = churches.filter(c => c.subscription?.status === 'EXPIRING').length;
+  const totalSubscriptionRevenueGHS = churches.reduce((sum, c) => sum + (c.subscription?.priceGHS || 0), 0);
 
   // Recent Registrations
   const recentRegistrations = [...churches]
@@ -1055,14 +1055,15 @@ router.put('/subscriptions/:churchId', (req: AuthenticatedRequest, res: Response
   db.update('churches', list =>
     list.map(c => {
       if (c.id === churchId) {
+        const currSub = c.subscription || { plan: 'Growth', status: 'ACTIVE' as const, expiresAt: '', priceGHS: 250 };
         return {
           ...c,
           subscription: {
-            ...c.subscription,
-            plan: plan || c.subscription.plan,
-            status: status || c.subscription.status,
-            expiresAt: expiresAt || c.subscription.expiresAt,
-            priceGHS: priceGHS !== undefined ? Number(priceGHS) : c.subscription.priceGHS,
+            ...currSub,
+            plan: plan || currSub.plan,
+            status: (status as any) || currSub.status,
+            expiresAt: expiresAt || currSub.expiresAt,
+            priceGHS: priceGHS !== undefined ? Number(priceGHS) : currSub.priceGHS,
           },
         };
       }
@@ -1077,7 +1078,7 @@ router.put('/subscriptions/:churchId', (req: AuthenticatedRequest, res: Response
       userId: req.user?.id || 'su@admin',
       userName: req.user?.fullName || 'Super Admin',
       action: 'SUBSCRIPTION_UPDATED',
-      details: `Updated subscription for "${church.name}": Plan ${plan || church.subscription.plan}, Status ${status || church.subscription.status}`,
+      details: `Updated subscription for "${church.name}": Plan ${plan || church.subscription?.plan || 'Growth'}, Status ${status || church.subscription?.status || 'ACTIVE'}`,
       timestamp: new Date().toISOString(),
     },
     ...logs.slice(0, 499),

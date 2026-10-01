@@ -50,6 +50,13 @@ export const Navbar: React.FC<Props> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = async () => {
+    // Skip notification polling if unauthenticated or if Super Admin without a church context
+    if (!ApiClient.getToken() || isSuperAdmin || (!church?.id && !user.churchId)) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
     try {
       setLoadingNotifications(true);
       const res = await ApiClient.get('/api/church/notifications');
@@ -60,8 +67,8 @@ export const Navbar: React.FC<Props> = ({
         setNotifications(res);
         setUnreadCount(res.filter((n: any) => !n.isRead).length);
       }
-    } catch (err) {
-      console.error('Failed to load notifications:', err);
+    } catch (err: any) {
+      console.warn('Could not refresh church notifications:', err?.message || err);
     } finally {
       setLoadingNotifications(false);
     }

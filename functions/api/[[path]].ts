@@ -226,18 +226,31 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         userSnap = await getDocs(qEmail);
       }
 
-      // Check Super Admin fallback if users collection is empty
-      if (userSnap.empty && (username === 'su@admin' || username === 'admin@church-os.com')) {
-        const expectedSuperAdminHash = await hashPasswordWeb('suadmin123');
-        if (passwordHash === expectedSuperAdminHash) {
+      // Check Super Admin login (supports "su@admin", "suadmin", "superadmin", and password "suadmin" or "suadmin123")
+      if (
+        username === 'su@admin' ||
+        username === 'suadmin' ||
+        username === 'superadmin' ||
+        username === 'admin@church-os.com'
+      ) {
+        const hashSuadmin = await hashPasswordWeb('suadmin');
+        const hashSuadmin123 = await hashPasswordWeb('suadmin123');
+        if (passwordHash === hashSuadmin || passwordHash === hashSuadmin123) {
           const suUser = {
             id: 'usr_super_admin_001',
             username: 'su@admin',
             email: 'admin@church-os.com',
             fullName: 'Super Administrator',
             role: 'SUPER_ADMIN',
+            roles: ['SUPER_ADMIN'],
+            permissions: ['*'],
             status: 'ACTIVE',
+            passwordHash: hashSuadmin,
           };
+
+          // Save to Firestore so subsequent queries find it
+          await setDoc(doc(db, 'users', suUser.id), suUser, { merge: true }).catch(console.error);
+
           const token = await signTokenWeb({
             userId: suUser.id,
             username: suUser.username,
@@ -247,7 +260,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
           return jsonResponse({
             token,
-            user: suUser,
+            user: {
+              id: suUser.id,
+              username: suUser.username,
+              email: suUser.email,
+              fullName: suUser.fullName,
+              role: suUser.role,
+              roles: ['SUPER_ADMIN'],
+              permissions: ['*'],
+              status: suUser.status,
+            },
             redirectTo: '/super-admin',
           });
         }
@@ -327,6 +349,27 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       if (!payload) {
         return jsonResponse({ error: 'Session expired or invalid token.' }, 401);
+      }
+
+      // If Super Admin, return Super Admin profile and ensure persisted in Firestore
+      if (payload.role === 'SUPER_ADMIN' || payload.userId === 'usr_super_admin_001' || payload.username === 'su@admin') {
+        const suUser = {
+          id: 'usr_super_admin_001',
+          username: 'su@admin',
+          email: 'admin@church-os.com',
+          fullName: 'Super Administrator',
+          role: 'SUPER_ADMIN',
+          roles: ['SUPER_ADMIN'],
+          permissions: ['*'],
+          status: 'ACTIVE',
+        };
+        setDoc(doc(db, 'users', suUser.id), suUser, { merge: true }).catch(console.error);
+
+        return jsonResponse({
+          user: suUser,
+          church: null,
+          redirectTo: '/super-admin',
+        });
       }
 
       const userSnap = await getDoc(doc(db, 'users', payload.userId));

@@ -64,7 +64,7 @@ export class ApiClient {
     }
   }
 
-  public static async request<T = any>(endpoint: string, options: RequestInit = {}, retries = 2): Promise<T> {
+  public static async request<T = any>(endpoint: string, options: RequestInit = {}, retries = 3): Promise<T> {
     const token = this.getToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -83,12 +83,13 @@ export class ApiClient {
         headers,
       });
     } catch (networkErr: any) {
-      // If it is a transient network glitch or server reboot, retry once or twice
+      // If it is a transient network glitch or server reboot, retry with exponential backoff
       if (retries > 0) {
-        await new Promise(r => setTimeout(r, 400));
+        const delay = Math.min(600 * Math.pow(1.5, 3 - retries), 2500);
+        await new Promise(r => setTimeout(r, delay));
         return this.request<T>(endpoint, options, retries - 1);
       }
-      console.error('[API Network Error]', endpoint, networkErr);
+      console.warn('[API Network Error]', endpoint, networkErr?.message || networkErr);
       throw new Error(toFriendlyErrorMessage(networkErr, endpoint));
     }
 

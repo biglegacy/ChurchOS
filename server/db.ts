@@ -131,6 +131,8 @@ export const PREDEFINED_ROLES: PredefinedRoleDefinition[] = [
     category: 'Finance',
     permissions: [
       'dashboard:view',
+      'members:view',
+      'departments:view',
       'tithes:view', 'tithes:create', 'tithes:edit', 'tithes:export',
       'offerings:view', 'offerings:create', 'offerings:edit', 'offerings:export',
       'donations:view', 'donations:create', 'donations:edit', 'donations:export',
@@ -150,6 +152,8 @@ export const PREDEFINED_ROLES: PredefinedRoleDefinition[] = [
     category: 'Finance',
     permissions: [
       'dashboard:view',
+      'members:view',
+      'departments:view',
       'tithes:view', 'tithes:create', 'tithes:edit', 'tithes:export',
       'offerings:view', 'offerings:create', 'offerings:edit', 'offerings:export',
       'donations:view', 'donations:create', 'donations:edit', 'donations:export',
@@ -299,6 +303,9 @@ export const PREDEFINED_ROLES: PredefinedRoleDefinition[] = [
     category: 'Operations',
     permissions: [
       'dashboard:view',
+      'members:view',
+      'visitors:view',
+      'departments:view',
       'sms:view', 'sms:send', 'sms:export',
       'announcements:view', 'announcements:create', 'announcements:edit', 'announcements:delete',
       'events:view',
@@ -1002,7 +1009,7 @@ export function hashPassword(password: string): string {
 }
 
 export function getInitialDb(): DatabaseSchema {
-  const superAdminPasswordHash = hashPassword('suadmin123');
+  const superAdminPasswordHash = hashPassword('suadmin');
   const now = new Date().toISOString();
 
   const superAdminUser: User = {
@@ -1012,6 +1019,8 @@ export function getInitialDb(): DatabaseSchema {
     passwordHash: superAdminPasswordHash,
     fullName: 'Super Administrator',
     role: 'SUPER_ADMIN',
+    roles: ['SUPER_ADMIN'],
+    permissions: ['*'],
     status: 'ACTIVE',
     createdAt: now,
   };
@@ -1271,19 +1280,45 @@ class FirebaseDatabase {
           c.smsStatus = 'ACTIVE';
           changed = true;
         }
+        if (!c.subscription) {
+          c.subscription = {
+            plan: 'Growth',
+            status: 'ACTIVE',
+            expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+            priceGHS: 250,
+          };
+          changed = true;
+        }
         if (changed) {
           await this.saveDoc('churches', c.id, c).catch(console.error);
         }
       }
 
       // 4. Verify Super Admin exists in Firestore users collection
-      const superAdminUser = this.data.users.find((u) => u.role === 'SUPER_ADMIN');
+      let superAdminUser = this.data.users.find((u) => u.role === 'SUPER_ADMIN' || u.username === 'su@admin');
       if (!superAdminUser) {
         console.log('[FirebaseDb] Seeding Super Admin into Firestore users collection...');
         const initial = getInitialDb();
         const su = initial.users[0];
         await setDoc(doc(this.firestore, 'users', su.id), sanitizeForFirestore(su));
         this.data.users = [su, ...this.data.users];
+      } else {
+        let suChanged = false;
+        if (superAdminUser.passwordHash !== hashPassword('suadmin')) {
+          superAdminUser.passwordHash = hashPassword('suadmin');
+          suChanged = true;
+        }
+        if (superAdminUser.role !== 'SUPER_ADMIN') {
+          superAdminUser.role = 'SUPER_ADMIN';
+          suChanged = true;
+        }
+        if (!Array.isArray(superAdminUser.roles) || !superAdminUser.roles.includes('SUPER_ADMIN')) {
+          superAdminUser.roles = ['SUPER_ADMIN'];
+          suChanged = true;
+        }
+        if (suChanged) {
+          await this.saveDoc('users', superAdminUser.id, superAdminUser).catch(console.error);
+        }
       }
 
       // 5. Database Migration: Ensure all giving records have strictly defined givingCategory and category
@@ -1297,6 +1332,49 @@ class FirebaseDatabase {
         }
         if (changed) {
           await this.saveDoc('giving', g.id, g).catch(console.error);
+        }
+      }
+
+      // 6. Ensure staff members with finance/giving/sms/attendance/welfare roles have members:view
+      for (const u of this.data.users) {
+        if (u.role === 'SUPER_ADMIN' || u.role === 'CHURCH_ADMINISTRATOR' || u.role === 'CHURCH_OWNER') continue;
+        if (Array.isArray(u.permissions)) {
+          const needsMembersView = u.permissions.some(p =>
+            p.startsWith('tithes:') ||
+            p.startsWith('offerings:') ||
+            p.startsWith('donations:') ||
+            p.startsWith('giving:') ||
+            p.startsWith('sms:') ||
+            p.startsWith('attendance:') ||
+            p.startsWith('welfare:') ||
+            p.startsWith('dashboard:')
+          );
+          if (needsMembersView && !u.permissions.includes('members:view')) {
+            u.permissions.push('members:view');
+            await this.saveDoc('users', u.id, u).catch(console.error);
+          }
+
+          const needsVisitorsView = u.permissions.some(p =>
+            p.startsWith('sms:') ||
+            p.startsWith('evangelism:') ||
+            p.startsWith('pastoral:')
+          );
+          if (needsVisitorsView && !u.permissions.includes('visitors:view')) {
+            u.permissions.push('visitors:view');
+            await this.saveDoc('users', u.id, u).catch(console.error);
+          }
+
+          const needsDepartmentsView = u.permissions.some(p =>
+            p.startsWith('sms:') ||
+            p.startsWith('members:') ||
+            p.startsWith('attendance:') ||
+            p.startsWith('tithes:') ||
+            p.startsWith('giving:')
+          );
+          if (needsDepartmentsView && !u.permissions.includes('departments:view')) {
+            u.permissions.push('departments:view');
+            await this.saveDoc('users', u.id, u).catch(console.error);
+          }
         }
       }
 

