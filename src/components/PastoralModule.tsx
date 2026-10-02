@@ -13,13 +13,17 @@ import {
   FileText,
 } from 'lucide-react';
 import { ApiClient } from '../api';
-import { PastoralCareCase, Member } from '../types';
+import { PastoralCareCase, Member, hasPermission } from '../types';
 import { useMembers } from '../context/MembersContext';
 import { MemberSelector } from './common/MemberSelector';
 import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 export const PastoralModule: React.FC = () => {
   const { members } = useMembers();
+  const currentUser = ApiClient.getUser();
+  const canCreatePastoral = hasPermission(currentUser, 'pastoral:create') || hasPermission(currentUser, 'manage_pastoral');
+  const canEditPastoral = hasPermission(currentUser, 'pastoral:edit') || hasPermission(currentUser, 'manage_pastoral');
+
   const [cases, setCases] = useState<PastoralCareCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCase, setSelectedCase] = useState<PastoralCareCase | null>(null);
@@ -118,6 +122,10 @@ export const PastoralModule: React.FC = () => {
 
   const handleCreateCase = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreatePastoral) {
+      setError('You do not have permission to create pastoral care records.');
+      return;
+    }
     const actualCaseType = isCustomCategory ? customCategoryInput.trim() : formData.caseType;
 
     if (!actualCaseType) {
@@ -161,6 +169,10 @@ export const PastoralModule: React.FC = () => {
   };
 
   const handleUpdateStatus = async (id: string, status: string) => {
+    if (!canEditPastoral) {
+      setError('You do not have permission to modify pastoral care records.');
+      return;
+    }
     try {
       await ApiClient.put(`/api/church/pastoral/${id}`, { status });
       setNotice(`Updated status to ${status}.`);
@@ -187,13 +199,15 @@ export const PastoralModule: React.FC = () => {
             <span>Restricted access: Protected for ordained pastoral leadership and counseling ministers.</span>
           </p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs rounded-md shadow-xs flex items-center justify-center space-x-1.5 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Pastoral Record</span>
-        </button>
+        {canCreatePastoral && (
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs rounded-md shadow-xs flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Pastoral Record</span>
+          </button>
+        )}
       </div>
 
       {notice && (

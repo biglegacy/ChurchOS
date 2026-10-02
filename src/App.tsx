@@ -56,9 +56,12 @@ export default function App() {
       if (token) {
         try {
           const res = await ApiClient.get('/api/auth/me');
-          setUser(res.user);
-          setChurch(res.church || null);
-          setActiveTab(determineInitialTab(res.user));
+          if (res.user) {
+            ApiClient.setAuth(token, res.user, res.church || null);
+            setUser(res.user);
+            setChurch(res.church || null);
+            setActiveTab(determineInitialTab(res.user));
+          }
         } catch (err) {
           console.warn('Session expired or invalid token:', err);
           ApiClient.logout();
@@ -74,8 +77,12 @@ export default function App() {
 
   const refreshAuthData = async () => {
     try {
+      const token = ApiClient.getToken();
       const res = await ApiClient.get('/api/auth/me');
-      if (res.user) setUser(res.user);
+      if (res.user && token) {
+        ApiClient.setAuth(token, res.user, res.church || null);
+        setUser(res.user);
+      }
       if (res.church) setChurch(res.church);
     } catch {
       // Ignore background refresh errors
@@ -94,6 +101,9 @@ export default function App() {
     setChurch(null);
     setDrawerOpen(false);
     setActiveTab('dashboard');
+    try {
+      sessionStorage.clear();
+    } catch {}
   };
 
   const handleQuickAction = (action: string) => {

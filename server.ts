@@ -128,7 +128,7 @@ async function startServer() {
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`===========================================`);
     console.log(` Church-OS SaaS Engine running on port ${PORT}`);
-    console.log(` Super Admin: su@admin / suadmin123`);
+    console.log(` Multi-Tenant Church Management System`);
     console.log(`===========================================`);
 
     // Start background autonomous Birthday SMS scheduler

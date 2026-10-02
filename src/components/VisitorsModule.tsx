@@ -14,12 +14,19 @@ import {
   Trash2,
 } from 'lucide-react';
 import { ApiClient } from '../api';
-import { Visitor, NewConvert } from '../types';
+import { Visitor, NewConvert, hasPermission } from '../types';
 import { useMembers } from '../context/MembersContext';
 import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 
 export const VisitorsModule: React.FC = () => {
   const { refreshMembers } = useMembers();
+  const currentUser = ApiClient.getUser();
+
+  const canCreateVisitor = hasPermission(currentUser, 'visitors:create') || hasPermission(currentUser, 'manage_visitors');
+  const canEditVisitor = hasPermission(currentUser, 'visitors:edit') || hasPermission(currentUser, 'manage_visitors');
+  const canDeleteVisitor = hasPermission(currentUser, 'visitors:delete') || hasPermission(currentUser, 'manage_visitors');
+  const canConvertVisitor = hasPermission(currentUser, 'visitors:edit') || hasPermission(currentUser, 'members:create') || hasPermission(currentUser, 'manage_visitors');
+
   const [activeTab, setActiveTab] = useState<'visitors' | 'converts'>('visitors');
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [converts, setConverts] = useState<NewConvert[]>([]);
@@ -92,6 +99,10 @@ export const VisitorsModule: React.FC = () => {
 
   const handleSaveVisitor = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateVisitor) {
+      setError('You do not have permission to register visitors.');
+      return;
+    }
     if (!visitorForm.fullName || !visitorForm.phone) {
       setError('Please provide full name and phone number.');
       return;
@@ -113,6 +124,10 @@ export const VisitorsModule: React.FC = () => {
 
   const handleSaveConvert = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateVisitor) {
+      setError('You do not have permission to enroll converts.');
+      return;
+    }
     if (!convertForm.fullName || !convertForm.phone) {
       setError('Please provide name and phone number.');
       return;
@@ -133,11 +148,20 @@ export const VisitorsModule: React.FC = () => {
   };
 
   const handleConvertToMember = (visitor: Visitor) => {
+    if (!canConvertVisitor) {
+      setError('You do not have permission to promote visitors to members.');
+      return;
+    }
     setVisitorToPromote(visitor);
   };
 
   const handleConfirmPromoteVisitor = async () => {
     if (!visitorToPromote) return;
+    if (!canConvertVisitor) {
+      setError('You do not have permission to promote visitors to members.');
+      setVisitorToPromote(null);
+      return;
+    }
     try {
       setIsPromoting(true);
       setError(null);
@@ -154,6 +178,11 @@ export const VisitorsModule: React.FC = () => {
 
   const handleConfirmDeleteVisitor = async () => {
     if (!visitorToDelete) return;
+    if (!canDeleteVisitor) {
+      setError('You do not have permission to delete visitors.');
+      setVisitorToDelete(null);
+      return;
+    }
     try {
       setIsDeletingVisitor(true);
       setError(null);
@@ -170,6 +199,11 @@ export const VisitorsModule: React.FC = () => {
 
   const handleConfirmDeleteConvert = async () => {
     if (!convertToDelete) return;
+    if (!canDeleteVisitor) {
+      setError('You do not have permission to delete convert records.');
+      setConvertToDelete(null);
+      return;
+    }
     try {
       setIsDeletingConvert(true);
       setError(null);
@@ -185,6 +219,10 @@ export const VisitorsModule: React.FC = () => {
   };
 
   const handleUpdateFollowUpStatus = async (id: string, status: string) => {
+    if (!canEditVisitor) {
+      setError('You do not have permission to update follow-up statuses.');
+      return;
+    }
     try {
       await ApiClient.put(`/api/church/visitors/${id}`, { followUpStatus: status });
       await loadData();
@@ -194,6 +232,10 @@ export const VisitorsModule: React.FC = () => {
   };
 
   const handleAdvanceDiscipleship = async (id: string, currentStage: string) => {
+    if (!canEditVisitor) {
+      setError('You do not have permission to advance discipleship stages.');
+      return;
+    }
     const stages = [
       'Salvation Decision',
       'Foundation Classes',
@@ -228,22 +270,24 @@ export const VisitorsModule: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center space-x-2">
-          {activeTab === 'visitors' ? (
-            <button
-              onClick={() => setShowAddVisitorModal(true)}
-              className="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs rounded-md shadow-xs flex items-center space-x-1.5 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Register First-Timer</span>
-            </button>
-          ) : (
-            <button
-              onClick={() => setShowAddConvertModal(true)}
-              className="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs rounded-md shadow-xs flex items-center space-x-1.5 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Enroll New Convert</span>
-            </button>
+          {canCreateVisitor && (
+            activeTab === 'visitors' ? (
+              <button
+                onClick={() => setShowAddVisitorModal(true)}
+                className="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs rounded-md shadow-xs flex items-center space-x-1.5 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Register First-Timer</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowAddConvertModal(true)}
+                className="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs rounded-md shadow-xs flex items-center space-x-1.5 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Enroll New Convert</span>
+              </button>
+            )
           )}
         </div>
       </div>
@@ -320,7 +364,8 @@ export const VisitorsModule: React.FC = () => {
                     <select
                       value={v.followUpStatus}
                       onChange={e => handleUpdateFollowUpStatus(v.id, e.target.value)}
-                      className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white"
+                      disabled={!canEditVisitor}
+                      className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       <option value="Pending Follow-up">Pending Follow-up</option>
                       <option value="Contacted">Contacted</option>
@@ -329,22 +374,26 @@ export const VisitorsModule: React.FC = () => {
                       <option value="Dormant">Dormant</option>
                     </select>
 
-                    <button
-                      onClick={() => handleConvertToMember(v)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg flex items-center space-x-1 shadow-xs transition cursor-pointer"
-                      title="Promote to Full Member"
-                    >
-                      <UserCheck className="w-3.5 h-3.5" />
-                      <span>Make Member</span>
-                    </button>
+                    {canConvertVisitor && (
+                      <button
+                        onClick={() => handleConvertToMember(v)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg flex items-center space-x-1 shadow-xs transition cursor-pointer"
+                        title="Promote to Full Member"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Make Member</span>
+                      </button>
+                    )}
 
-                    <button
-                      onClick={() => setVisitorToDelete(v)}
-                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                      title="Delete Visitor Record"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canDeleteVisitor && (
+                      <button
+                        onClick={() => setVisitorToDelete(v)}
+                        className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                        title="Delete Visitor Record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))
@@ -381,21 +430,25 @@ export const VisitorsModule: React.FC = () => {
                   </div>
 
                   <div className="flex items-center space-x-2 shrink-0">
-                    <button
-                      onClick={() => handleAdvanceDiscipleship(c.id, c.discipleshipStage)}
-                      className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 font-medium rounded-md flex items-center space-x-1 transition-colors cursor-pointer"
-                    >
-                      <span>Advance Stage</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
+                    {canEditVisitor && (
+                      <button
+                        onClick={() => handleAdvanceDiscipleship(c.id, c.discipleshipStage)}
+                        className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 font-medium rounded-md flex items-center space-x-1 transition-colors cursor-pointer"
+                      >
+                        <span>Advance Stage</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
 
-                    <button
-                      onClick={() => setConvertToDelete(c)}
-                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                      title="Delete Convert Record"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canDeleteVisitor && (
+                      <button
+                        onClick={() => setConvertToDelete(c)}
+                        className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                        title="Delete Convert Record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))

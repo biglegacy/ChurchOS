@@ -29,7 +29,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { ApiClient } from '../api';
-import { Member, DepartmentOrGroup, Church } from '../types';
+import { Member, DepartmentOrGroup, Church, hasPermission } from '../types';
 import { normalizePhoneNumber, formatPhoneForDisplay } from '../utils/phoneUtils';
 import { useMembers } from '../context/MembersContext';
 import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
@@ -54,6 +54,11 @@ function calculateAge(dobString?: string): number | null {
 
 export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church }) => {
   const { refreshMembers } = useMembers();
+  const currentUser = ApiClient.getUser();
+  const canCreateMember = hasPermission(currentUser, 'members:create') || hasPermission(currentUser, 'manage_members');
+  const canEditMember = hasPermission(currentUser, 'members:edit') || hasPermission(currentUser, 'manage_members');
+  const canDeleteMember = hasPermission(currentUser, 'members:delete') || hasPermission(currentUser, 'manage_members');
+  const canSendSms = hasPermission(currentUser, 'sms:send') || hasPermission(currentUser, 'send_sms');
   const [members, setMembers] = useState<Member[]>([]);
   const [departments, setDepartments] = useState<DepartmentOrGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -475,31 +480,35 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Send SMS to All Directory button */}
-          <button
-            type="button"
-            onClick={() => handleOpenSmsModal(null)}
-            className="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200 font-semibold text-xs rounded-lg shadow-xs flex items-center space-x-1.5 transition cursor-pointer"
-            title="Send broadcast SMS to all church members"
-          >
-            <MessageSquare className="w-4 h-4 text-teal-700" />
-            <span>Send SMS to Directory</span>
-            <span className="ml-1 px-1.5 py-0.2 bg-teal-200 text-teal-950 rounded text-[10px] font-mono font-bold">
-              {churchSmsCredits} units
-            </span>
-          </button>
+          {canSendSms && (
+            <button
+              type="button"
+              onClick={() => handleOpenSmsModal(null)}
+              className="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200 font-semibold text-xs rounded-lg shadow-xs flex items-center space-x-1.5 transition cursor-pointer"
+              title="Send broadcast SMS to all church members"
+            >
+              <MessageSquare className="w-4 h-4 text-teal-700" />
+              <span>Send SMS to Directory</span>
+              <span className="ml-1 px-1.5 py-0.2 bg-teal-200 text-teal-950 rounded text-[10px] font-mono font-bold">
+                {churchSmsCredits} units
+              </span>
+            </button>
+          )}
 
           {/* Add New Member button */}
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setShowAddModal(true);
-            }}
-            className="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs rounded-lg shadow-xs flex items-center space-x-1.5 transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add New Member</span>
-          </button>
+          {canCreateMember && (
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setShowAddModal(true);
+              }}
+              className="px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs rounded-lg shadow-xs flex items-center space-x-1.5 transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add New Member</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -574,23 +583,27 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
           </div>
 
           <div className="flex items-center space-x-2">
-            <button
-              type="button"
-              onClick={() => handleOpenSmsModal(null)}
-              className="px-3 py-1.5 bg-teal-700 text-white hover:bg-teal-800 rounded-lg font-bold text-xs flex items-center space-x-1 transition cursor-pointer"
-            >
-              <MessageSquare className="w-3.5 h-3.5" />
-              <span>SMS Selected ({selectedMemberIds.length})</span>
-            </button>
+            {canSendSms && (
+              <button
+                type="button"
+                onClick={() => handleOpenSmsModal(null)}
+                className="px-3 py-1.5 bg-teal-700 text-white hover:bg-teal-800 rounded-lg font-bold text-xs flex items-center space-x-1 transition cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>SMS Selected ({selectedMemberIds.length})</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setShowBatchDeleteModal(true)}
-              className="px-3 py-1.5 bg-rose-600 text-white hover:bg-rose-700 rounded-lg font-bold text-xs flex items-center space-x-1 transition cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete Selected ({selectedMemberIds.length})</span>
-            </button>
+            {canDeleteMember && (
+              <button
+                type="button"
+                onClick={() => setShowBatchDeleteModal(true)}
+                className="px-3 py-1.5 bg-rose-600 text-white hover:bg-rose-700 rounded-lg font-bold text-xs flex items-center space-x-1 transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Selected ({selectedMemberIds.length})</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -727,14 +740,16 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
                     </span>
 
                     {/* Send SMS Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSmsModal(member)}
-                      title={`Send SMS to ${member.fullName}`}
-                      className="p-1.5 text-teal-700 hover:bg-teal-50 border border-teal-200 rounded-lg transition cursor-pointer"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                    </button>
+                    {canSendSms && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSmsModal(member)}
+                        title={`Send SMS to ${member.fullName}`}
+                        className="p-1.5 text-teal-700 hover:bg-teal-50 border border-teal-200 rounded-lg transition cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                      </button>
+                    )}
 
                     {/* View Profile */}
                     <button
@@ -747,31 +762,35 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
                     </button>
 
                     {/* Edit Member */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormData({
-                          ...member,
-                          dateOfBirth: member.dateOfBirth || '',
-                          photoUrl: member.photoUrl || '',
-                        });
-                        setShowAddModal(true);
-                      }}
-                      title="Edit Member Profile"
-                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition cursor-pointer"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canEditMember && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...member,
+                            dateOfBirth: member.dateOfBirth || '',
+                            photoUrl: member.photoUrl || '',
+                          });
+                          setShowAddModal(true);
+                        }}
+                        title="Edit Member Profile"
+                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
 
                     {/* Delete Member (Church can delete members) */}
-                    <button
-                      type="button"
-                      onClick={() => setMemberToDelete(member)}
-                      title={`Permanently delete ${member.fullName}`}
-                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canDeleteMember && (
+                      <button
+                        type="button"
+                        onClick={() => setMemberToDelete(member)}
+                        title={`Permanently delete ${member.fullName}`}
+                        className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -1146,26 +1165,30 @@ export const MembersModule: React.FC<Props> = ({ onRecordGivingForMember, church
 
                   {/* Actions in Detail Modal */}
                   <div className="pt-3 flex items-center justify-between border-t border-slate-100">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDetailModal(false);
-                        handleOpenSmsModal(selectedMember);
-                      }}
-                      className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-lg font-bold flex items-center space-x-1.5 transition cursor-pointer"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span>Send Direct SMS</span>
-                    </button>
+                    {canSendSms ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowDetailModal(false);
+                          handleOpenSmsModal(selectedMember);
+                        }}
+                        className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-lg font-bold flex items-center space-x-1.5 transition cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>Send Direct SMS</span>
+                      </button>
+                    ) : <div />}
 
-                    <button
-                      type="button"
-                      onClick={() => setMemberToDelete(selectedMember)}
-                      className="text-rose-600 hover:text-rose-700 font-semibold flex items-center space-x-1 px-3 py-1.5 rounded-lg hover:bg-rose-50 transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete Member</span>
-                    </button>
+                    {canDeleteMember && (
+                      <button
+                        type="button"
+                        onClick={() => setMemberToDelete(selectedMember)}
+                        className="text-rose-600 hover:text-rose-700 font-semibold flex items-center space-x-1 px-3 py-1.5 rounded-lg hover:bg-rose-50 transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete Member</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

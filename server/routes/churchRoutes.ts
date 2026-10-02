@@ -492,7 +492,7 @@ router.get('/members', (req: AuthenticatedRequest, res: Response, next: NextFunc
   res.json(members);
 });
 
-router.post('/members', requirePermission('members'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/members', requirePermission('members:create'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const data = req.body;
 
@@ -594,7 +594,7 @@ router.get('/members/:id', requirePermission('members'), (req: AuthenticatedRequ
   });
 });
 
-router.put('/members/:id', requirePermission('members'), async (req: AuthenticatedRequest, res: Response) => {
+router.put('/members/:id', requirePermission('members:edit'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
   const updates = req.body;
@@ -625,7 +625,7 @@ router.put('/members/:id', requirePermission('members'), async (req: Authenticat
   res.json({ success: true, member: updatedMember, message: 'Member updated successfully.' });
 });
 
-router.delete('/members/:id', requirePermission('members'), async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/members/:id', requirePermission('members:delete'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { id } = req.params;
 
@@ -654,7 +654,7 @@ router.delete('/members/:id', requirePermission('members'), async (req: Authenti
   res.json({ success: true, message: `Member ${member.fullName} deleted successfully.` });
 });
 
-router.post('/members/batch-delete', requirePermission('members'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/members/batch-delete', requirePermission('members:delete'), async (req: AuthenticatedRequest, res: Response) => {
   const churchId = getChurchId(req);
   const { memberIds } = req.body;
   if (!Array.isArray(memberIds) || memberIds.length === 0) {
@@ -3731,6 +3731,14 @@ router.put('/staff/:id', requirePermission('staff'), async (req: AuthenticatedRe
   if (!targetUser) {
     res.status(404).json({ error: 'Staff member not found in this church.' });
     return;
+  }
+
+  // Prevent self-privilege modification / escalation
+  if (req.user && req.user.id === staffId && !req.user.isPrimaryAccount && req.user.role !== 'CHURCH_OWNER' && req.user.role !== 'SUPER_ADMIN') {
+    if (req.body.roles !== undefined || req.body.role !== undefined || req.body.status !== undefined) {
+      res.status(403).json({ error: 'You cannot modify your own staff roles or status. Please contact your primary church administrator.' });
+      return;
+    }
   }
 
   const { fullName, email, phone, role, roles, customRoleTitle, status, password, assignedMemberId } = req.body;

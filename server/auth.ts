@@ -82,8 +82,8 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
     db.saveDoc('users', user.id, user).catch(console.error);
   }
 
-  if (!user || user.status === 'SUSPENDED') {
-    res.status(403).json({ error: 'User account is inactive or suspended.' });
+  if (!user || user.status === 'SUSPENDED' || user.status === 'INACTIVE' || user.status === 'DEACTIVATED' || user.status === 'DISABLED') {
+    res.status(403).json({ error: 'User account is inactive or suspended. Please contact your church administrator.' });
     return;
   }
 
@@ -238,7 +238,43 @@ export function hasPermission(user: User, permission: string, churchId?: string)
       'tithes', 'offerings', 'donations', 'special_giving', 'building_fund', 'missions', 'welfare'
     ];
     if (givingSubCategories.includes(category)) {
-      if (perms.includes(`giving:${action}`) || perms.includes('giving:*') || perms.includes('giving') || perms.includes('manage_giving')) {
+      if (
+        perms.includes(`giving:${action}`) ||
+        perms.includes('giving:*') ||
+        perms.includes('giving') ||
+        perms.includes('manage_giving') ||
+        perms.includes('finances')
+      ) {
+        return true;
+      }
+    }
+
+    // Bidirectional giving delegation: when checking giving:action, check subcategories
+    if (category === 'giving') {
+      if (
+        givingSubCategories.some(sub =>
+          perms.includes(`${sub}:${action}`) ||
+          perms.includes(`${sub}:*`) ||
+          perms.includes(sub) ||
+          perms.includes(`manage_${sub}`)
+        ) ||
+        perms.includes('manage_giving') ||
+        perms.includes('finances') ||
+        perms.includes('giving:*')
+      ) {
+        return true;
+      }
+    }
+
+    // Expenses delegation
+    if (category === 'expenses') {
+      if (
+        perms.includes(`expenses:${action}`) ||
+        perms.includes('expenses:*') ||
+        perms.includes('expenses') ||
+        perms.includes('manage_giving') ||
+        perms.includes('finances')
+      ) {
         return true;
       }
     }
@@ -293,7 +329,7 @@ export function hasPermission(user: User, permission: string, churchId?: string)
   const aliasMap: Record<string, string[]> = {
     view_dashboard: ['dashboard', 'dashboard:view'],
     dashboard: ['view_dashboard', 'dashboard:view'],
-    manage_members: ['members', 'members:view', 'members:create', 'members:edit'],
+    manage_members: ['members', 'members:view', 'members:create', 'members:edit', 'members:delete', 'members:export'],
     members: [
       'manage_members',
       'members:view',
@@ -321,18 +357,37 @@ export function hasPermission(user: User, permission: string, churchId?: string)
       'dashboard:view',
       'view_dashboard',
     ],
-    manage_attendance: ['attendance', 'attendance:view', 'attendance:create'],
-    attendance: ['manage_attendance', 'attendance:view'],
+    manage_attendance: ['attendance', 'attendance:view', 'attendance:create', 'attendance:edit', 'attendance:delete', 'attendance:export'],
+    attendance: ['manage_attendance', 'attendance:view', 'attendance:create'],
     send_sms: ['sms', 'sms:send', 'sms:view'],
     sms: ['send_sms', 'sms:send', 'sms:view'],
-    manage_giving: ['giving', 'finances', 'tithes:view', 'offerings:view'],
-    finances: ['giving', 'manage_giving', 'tithes:view'],
-    expenses: ['manage_giving', 'expenses:view', 'expenses:create'],
-    manage_visitors: ['visitors', 'visitors:view', 'visitors:create', 'visitors:edit', 'evangelism:view', 'sms', 'sms:send', 'pastoral'],
+    manage_giving: [
+      'giving',
+      'giving:view',
+      'giving:create',
+      'giving:edit',
+      'giving:delete',
+      'giving:export',
+      'finances',
+      'tithes:view',
+      'tithes:create',
+      'tithes:edit',
+      'tithes:export',
+      'offerings:view',
+      'offerings:create',
+      'donations:view',
+      'special_giving:view',
+      'building_fund:view',
+      'missions:view',
+      'welfare:view',
+    ],
+    finances: ['giving', 'manage_giving', 'tithes:view', 'expenses:view'],
+    expenses: ['manage_giving', 'finances', 'expenses:view', 'expenses:create', 'expenses:edit', 'expenses:approve', 'expenses:export'],
+    manage_visitors: ['visitors', 'visitors:view', 'visitors:create', 'visitors:edit', 'visitors:delete', 'evangelism:view', 'sms', 'sms:send', 'pastoral'],
     visitors: ['manage_visitors', 'visitors:view', 'visitors:create', 'visitors:edit', 'evangelism:view', 'sms', 'sms:send', 'pastoral'],
-    manage_pastoral: ['pastoral', 'pastoral:view'],
-    pastoral: ['manage_pastoral', 'pastoral:view'],
-    manage_departments: ['departments', 'departments:view', 'departments:edit'],
+    manage_pastoral: ['pastoral', 'pastoral:view', 'pastoral:create', 'pastoral:edit', 'pastoral:delete', 'welfare:view', 'welfare:create'],
+    pastoral: ['manage_pastoral', 'pastoral:view', 'welfare:view'],
+    manage_departments: ['departments', 'departments:view', 'departments:create', 'departments:edit', 'departments:delete'],
     departments: [
       'manage_departments',
       'departments:view',
@@ -346,13 +401,13 @@ export function hasPermission(user: User, permission: string, churchId?: string)
       'pastoral',
       'dashboard',
     ],
-    manage_events: ['events', 'events:view'],
+    manage_events: ['events', 'events:view', 'events:create', 'events:edit', 'events:delete'],
     events: ['manage_events', 'events:view'],
-    manage_tasks: ['tasks', 'tasks:view'],
+    manage_tasks: ['tasks', 'tasks:view', 'tasks:create', 'tasks:edit', 'tasks:delete'],
     tasks: ['manage_tasks', 'tasks:view'],
-    manage_staff: ['staff', 'staff:view'],
+    manage_staff: ['staff', 'staff:view', 'staff:create', 'staff:edit', 'staff:delete'],
     staff: ['manage_staff', 'staff:view'],
-    manage_settings: ['settings', 'settings:view'],
+    manage_settings: ['settings', 'settings:view', 'settings:edit'],
     settings: ['manage_settings', 'settings:view'],
     view_reports: ['reports', 'reports:view', 'financial_reports:view'],
     reports: ['view_reports', 'reports:view', 'financial_reports:view'],
@@ -369,7 +424,7 @@ export function requirePermission(permission: string) {
       return;
     }
 
-    if (req.user.status === 'SUSPENDED' || req.user.status === 'INACTIVE') {
+    if (req.user.status === 'SUSPENDED' || req.user.status === 'INACTIVE' || req.user.status === 'DEACTIVATED' || req.user.status === 'DISABLED') {
       res.status(403).json({ error: 'Staff account has been disabled or suspended. Contact your church administrator.' });
       return;
     }

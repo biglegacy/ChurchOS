@@ -19,9 +19,12 @@ import { AttendanceRecord, Member } from '../types';
 import { useMembers } from '../context/MembersContext';
 import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
 import { toFriendlyErrorMessage } from '../utils/friendlyError';
+import { hasPermission } from '../types';
 
 export const AttendanceModule: React.FC = () => {
   const { members, loading: loadingMembers } = useMembers();
+  const currentUser = ApiClient.getUser();
+  const canRecordAttendance = hasPermission(currentUser, 'attendance:create') || hasPermission(currentUser, 'manage_attendance');
 
   // Active view: 'take_attendance' | 'history'
   const [activeView, setActiveView] = useState<'take_attendance' | 'history'>('take_attendance');
@@ -110,6 +113,10 @@ export const AttendanceModule: React.FC = () => {
 
   // Mutually exclusive toggle for a member
   const handleSetStatus = (memberId: string, status: 'Present' | 'Absent') => {
+    if (!canRecordAttendance) {
+      setError('You have read-only access to attendance records.');
+      return;
+    }
     // When the user clicks Present or Absent for any student/member, consider that an attendance change and immediately enable the Save Attendance button again.
     setHasUnsavedChanges(true);
     setStatusMap(prev => {
@@ -128,6 +135,10 @@ export const AttendanceModule: React.FC = () => {
 
   // Batch actions
   const handleMarkAll = (status: 'Present' | 'Absent') => {
+    if (!canRecordAttendance) {
+      setError('You have read-only access to attendance records.');
+      return;
+    }
     setHasUnsavedChanges(true);
     const newMap: Record<string, 'Present' | 'Absent'> = { ...statusMap };
     for (const m of members) {
@@ -138,6 +149,10 @@ export const AttendanceModule: React.FC = () => {
   };
 
   const handleClearAll = () => {
+    if (!canRecordAttendance) {
+      setError('You have read-only access to attendance records.');
+      return;
+    }
     setHasUnsavedChanges(true);
     setStatusMap({});
     setNotice('Cleared all attendance marks for this date.');
@@ -145,6 +160,10 @@ export const AttendanceModule: React.FC = () => {
 
   // Save / Complete Attendance
   const handleSaveAttendance = async () => {
+    if (!canRecordAttendance) {
+      setError('You do not have permission to record attendance.');
+      return;
+    }
     // Prevent saving if already saving or if no changes have been made since last save
     if (isSavingRef.current || savingAttendance || !hasUnsavedChanges) {
       return;
@@ -413,72 +432,78 @@ export const AttendanceModule: React.FC = () => {
             </div>
 
             {/* Quick Batch Actions & Save Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-semibold text-slate-500">Quick Actions:</span>
-                <button
-                  type="button"
-                  onClick={() => handleMarkAll('Present')}
-                  className="px-2.5 py-1 text-xs font-semibold bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors flex items-center gap-1"
-                >
-                  <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Mark All Present</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleMarkAll('Absent')}
-                  className="px-2.5 py-1 text-xs font-semibold bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200 rounded-md transition-colors flex items-center gap-1"
-                >
-                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Mark All Absent</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClearAll}
-                  className="px-2.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
-                >
-                  Clear All
-                </button>
-              </div>
+            {canRecordAttendance ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-semibold text-slate-500">Quick Actions:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleMarkAll('Present')}
+                    className="px-2.5 py-1 text-xs font-semibold bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors flex items-center gap-1"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Mark All Present</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleMarkAll('Absent')}
+                    className="px-2.5 py-1 text-xs font-semibold bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200 rounded-md transition-colors flex items-center gap-1"
+                  >
+                    <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Mark All Absent</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearAll}
+                    className="px-2.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
+                  >
+                    Clear All
+                  </button>
+                </div>
 
-              {/* Save & Automated SMS Checkbox */}
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={sendAbsenceSms}
-                    onChange={e => setSendAbsenceSms(e.target.checked)}
-                    className="h-3.5 w-3.5 text-teal-700 rounded border-slate-300 focus:ring-teal-600"
-                  />
-                  <span>Send absence SMS to absentees</span>
-                </label>
+                {/* Save & Automated SMS Checkbox */}
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={sendAbsenceSms}
+                      onChange={e => setSendAbsenceSms(e.target.checked)}
+                      className="h-3.5 w-3.5 text-teal-700 rounded border-slate-300 focus:ring-teal-600"
+                    />
+                    <span>Send absence SMS to absentees</span>
+                  </label>
 
-                <button
-                  type="button"
-                  onClick={handleSaveAttendance}
-                  disabled={savingAttendance || !hasUnsavedChanges}
-                  title={
-                    savingAttendance
-                      ? 'Saving attendance...'
-                      : !hasUnsavedChanges
-                      ? 'Mark members as Present or Absent to enable saving'
-                      : 'Save attendance for this date'
-                  }
-                  className={`px-4 py-2 text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-all shrink-0 ${
-                    savingAttendance || !hasUnsavedChanges
-                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300/60 shadow-none'
-                      : 'bg-teal-700 hover:bg-teal-800 text-white cursor-pointer active:scale-95'
-                  }`}
-                >
-                  {savingAttendance ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Send className="w-3.5 h-3.5" />
-                  )}
-                  <span>{savingAttendance ? 'Saving Attendance...' : 'Save Attendance'}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveAttendance}
+                    disabled={savingAttendance || !hasUnsavedChanges}
+                    title={
+                      savingAttendance
+                        ? 'Saving attendance...'
+                        : !hasUnsavedChanges
+                        ? 'Mark members as Present or Absent to enable saving'
+                        : 'Save attendance for this date'
+                    }
+                    className={`px-4 py-2 text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-all shrink-0 ${
+                      savingAttendance || !hasUnsavedChanges
+                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300/60 shadow-none'
+                        : 'bg-teal-700 hover:bg-teal-800 text-white cursor-pointer active:scale-95'
+                    }`}
+                  >
+                    {savingAttendance ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" />
+                    )}
+                    <span>{savingAttendance ? 'Saving Attendance...' : 'Save Attendance'}</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-lg text-xs text-amber-800 flex items-center justify-between">
+                <span><strong>View-Only Mode:</strong> You can view attendance rosters and history. Recording attendance requires attendance modification permissions.</span>
+              </div>
+            )}
           </div>
 
           {/* Members Attendance List */}

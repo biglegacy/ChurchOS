@@ -196,46 +196,6 @@ export const LoginView: React.FC<Props> = ({ onLoginSuccess }) => {
             </button>
           </form>
 
-          {/* Quick Sign In / Credentials Helper */}
-          <div className="mt-4 pt-3 border-t border-slate-100">
-            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
-              Quick Sign In / Available Accounts
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername('su@admin');
-                  setPassword('suadmin');
-                  setError(null);
-                }}
-                className="text-left p-2 rounded-lg border border-slate-200 hover:border-teal-500 hover:bg-teal-50/50 transition-colors cursor-pointer"
-              >
-                <div className="text-[11px] font-bold text-slate-800 flex items-center justify-between">
-                  <span>Super Admin</span>
-                  <span className="text-[9px] bg-slate-100 text-slate-600 px-1 py-0.5 rounded">Platform</span>
-                </div>
-                <div className="text-[10px] text-slate-500 truncate mt-0.5">su@admin • suadmin</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername('phci@gmail.com');
-                  setPassword('123456');
-                  setError(null);
-                }}
-                className="text-left p-2 rounded-lg border border-slate-200 hover:border-teal-500 hover:bg-teal-50/50 transition-colors cursor-pointer"
-              >
-                <div className="text-[11px] font-bold text-slate-800 flex items-center justify-between">
-                  <span>Church Admin</span>
-                  <span className="text-[9px] bg-teal-100 text-teal-700 px-1 py-0.5 rounded">PHCI</span>
-                </div>
-                <div className="text-[10px] text-slate-500 truncate mt-0.5">phci@gmail.com • 123456</div>
-              </button>
-            </div>
-          </div>
-
           {/* Register Church Callout Link - Requirement 2 */}
           <div className="mt-6 pt-5 border-t border-slate-100 text-center">
             <p className="text-xs text-slate-600">

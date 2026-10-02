@@ -710,6 +710,7 @@ export function hasPermission(
   if (userPerms.includes('*') || userPerms.includes(permission)) return true;
 
   const [reqCategory, reqAction] = permission.includes(':') ? permission.split(':') : [permission, 'view'];
+  const givingCategories = ['tithes', 'offerings', 'donations', 'special_giving', 'building_fund', 'missions', 'welfare'];
 
   for (const granted of userPerms) {
     if (granted === '*') return true;
@@ -725,27 +726,85 @@ export function hasPermission(
       return true;
     }
 
-    // Giving sub-categories mapped to financial permissions
-    const givingCategories = ['tithes', 'offerings', 'donations', 'special_giving', 'building_fund', 'missions', 'welfare'];
-    if (reqCategory === 'giving' && givingCategories.includes(granted.split(':')[0])) {
-      return true;
+    const [grantCat, grantAct] = granted.includes(':') ? granted.split(':') : [granted, ''];
+
+    // Giving sub-categories delegation:
+    if (reqCategory === 'giving') {
+      if (reqAction === 'view') {
+        if (givingCategories.includes(grantCat) || grantCat === 'finances') return true;
+      } else {
+        if (givingCategories.includes(grantCat) && (grantAct === reqAction || grantAct === '*' || !grantAct)) {
+          return true;
+        }
+      }
     }
-    if (givingCategories.includes(reqCategory) && (granted === 'giving' || granted === 'giving:*' || granted === 'finances')) {
-      return true;
+    if (givingCategories.includes(reqCategory)) {
+      if (grantCat === 'giving' || grantCat === 'finances') {
+        if (!grantAct || grantAct === '*' || grantAct === reqAction) return true;
+      }
     }
-    if (reqCategory === 'financial_reports' && (granted === 'giving' || granted === 'finances' || granted === 'expenses')) {
-      return true;
+
+    // Expenses delegation:
+    if (reqCategory === 'expenses') {
+      if (grantCat === 'finances' || grantCat === 'manage_giving') {
+        if (reqAction === 'view' || grantAct === reqAction || !grantAct) return true;
+      }
+    }
+
+    // Financial reports delegation:
+    if (reqCategory === 'financial_reports') {
+      if ((grantCat === 'giving' || grantCat === 'finances' || grantCat === 'expenses') && (reqAction === 'view' || grantAct === reqAction || grantAct === '*')) {
+        return true;
+      }
     }
   }
+
+  // Category general access check: if checking module view (e.g. 'giving', 'visitors', 'pastoral')
+  if (permission === 'giving') {
+    return userPerms.some(p =>
+      givingCategories.some(cat => p === cat || p.startsWith(`${cat}:`) || p === `manage_${cat}`) ||
+      p === 'manage_giving' ||
+      p === 'finances'
+    );
+  }
+
+  if (permission === 'visitors') {
+    return userPerms.some(
+      p =>
+        p.startsWith('visitors:') ||
+        p.startsWith('evangelism:') ||
+        p === 'visitors' ||
+        p === 'manage_visitors' ||
+        p.startsWith('sms:') ||
+        p === 'send_sms' ||
+        p.startsWith('pastoral:') ||
+        p === 'manage_pastoral'
+    );
+  }
+
+  if (permission === 'pastoral') {
+    return userPerms.some(p => p.startsWith('pastoral:') || p.startsWith('welfare:') || p === 'pastoral' || p === 'manage_pastoral');
+  }
+
+  // Does user hold any action under this category?
+  const hasCategoryAction = userPerms.some(p =>
+    p === permission ||
+    p.startsWith(`${permission}:`) ||
+    p === `manage_${permission}` ||
+    p === `view_${permission}`
+  );
+  if (hasCategoryAction) return true;
 
   // Alias mapping
   const aliasMap: Record<string, string[]> = {
     view_dashboard: ['dashboard', 'dashboard:view'],
     dashboard: ['view_dashboard', 'dashboard:view'],
-    manage_members: ['members', 'members:edit', 'members:create'],
+    manage_members: ['members', 'members:view', 'members:create', 'members:edit', 'members:delete', 'members:export'],
     members: [
       'manage_members',
       'members:view',
+      'members:create',
+      'members:edit',
       'giving',
       'tithes:view',
       'tithes:create',
@@ -768,17 +827,37 @@ export function hasPermission(
       'dashboard:view',
       'view_dashboard',
     ],
-    manage_attendance: ['attendance', 'attendance:edit', 'attendance:create'],
-    attendance: ['manage_attendance', 'attendance:view'],
-    send_sms: ['sms', 'sms:send'],
-    sms: ['send_sms', 'sms:view'],
-    manage_giving: ['giving', 'giving:create', 'giving:edit'],
-    giving: ['manage_giving', 'giving:view', 'tithes', 'offerings'],
-    manage_visitors: ['visitors', 'visitors:view', 'visitors:create', 'visitors:edit', 'evangelism:view', 'sms', 'sms:send', 'pastoral'],
+    manage_attendance: ['attendance', 'attendance:view', 'attendance:create', 'attendance:edit', 'attendance:delete', 'attendance:export'],
+    attendance: ['manage_attendance', 'attendance:view', 'attendance:create'],
+    send_sms: ['sms', 'sms:send', 'sms:view'],
+    sms: ['send_sms', 'sms:send', 'sms:view'],
+    manage_giving: [
+      'giving',
+      'giving:view',
+      'giving:create',
+      'giving:edit',
+      'giving:delete',
+      'giving:export',
+      'finances',
+      'tithes:view',
+      'tithes:create',
+      'tithes:edit',
+      'tithes:export',
+      'offerings:view',
+      'offerings:create',
+      'donations:view',
+      'special_giving:view',
+      'building_fund:view',
+      'missions:view',
+      'welfare:view',
+    ],
+    giving: ['manage_giving', 'giving:view', 'finances', 'tithes', 'offerings', 'donations', 'tithes:view', 'offerings:view'],
+    expenses: ['manage_giving', 'finances', 'expenses:view', 'expenses:create', 'expenses:edit', 'expenses:approve', 'expenses:export'],
+    manage_visitors: ['visitors', 'visitors:view', 'visitors:create', 'visitors:edit', 'visitors:delete', 'evangelism:view', 'sms', 'sms:send', 'pastoral'],
     visitors: ['manage_visitors', 'visitors:view', 'visitors:create', 'visitors:edit', 'evangelism:view', 'sms', 'sms:send', 'pastoral'],
-    manage_pastoral: ['pastoral', 'pastoral:create', 'pastoral:edit'],
-    pastoral: ['manage_pastoral', 'pastoral:view'],
-    manage_departments: ['departments', 'departments:edit'],
+    manage_pastoral: ['pastoral', 'pastoral:view', 'pastoral:create', 'pastoral:edit', 'pastoral:delete', 'welfare:view', 'welfare:create'],
+    pastoral: ['manage_pastoral', 'pastoral:view', 'welfare:view'],
+    manage_departments: ['departments', 'departments:view', 'departments:create', 'departments:edit', 'departments:delete'],
     departments: [
       'manage_departments',
       'departments:view',
@@ -792,17 +871,17 @@ export function hasPermission(
       'pastoral',
       'dashboard',
     ],
-    manage_events: ['events', 'events:create', 'events:edit'],
+    manage_events: ['events', 'events:view', 'events:create', 'events:edit', 'events:delete'],
     events: ['manage_events', 'events:view'],
-    manage_tasks: ['tasks', 'tasks:edit'],
+    manage_tasks: ['tasks', 'tasks:view', 'tasks:create', 'tasks:edit', 'tasks:delete'],
     tasks: ['manage_tasks', 'tasks:view'],
-    manage_staff: ['staff', 'staff:edit', 'staff:create'],
+    manage_staff: ['staff', 'staff:view', 'staff:create', 'staff:edit', 'staff:delete'],
     staff: ['manage_staff', 'staff:view'],
-    manage_settings: ['settings', 'settings:edit'],
+    manage_settings: ['settings', 'settings:view', 'settings:edit'],
     settings: ['manage_settings', 'settings:view'],
     view_reports: ['reports', 'reports:view', 'financial_reports:view'],
-    reports: ['view_reports', 'reports:view'],
-    audit_logs: ['audit_logs:view', 'staff'],
+    reports: ['view_reports', 'reports:view', 'financial_reports:view'],
+    audit_logs: ['audit_logs:view', 'staff', 'audit_logs'],
   };
 
   const aliases = aliasMap[permission] || [];

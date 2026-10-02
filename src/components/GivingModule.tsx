@@ -26,7 +26,7 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { ApiClient } from '../api';
-import { GivingRecord, ExpenseRecord, Member, Church, GivingCategoryType, GIVING_CATEGORIES } from '../types';
+import { GivingRecord, ExpenseRecord, Member, Church, GivingCategoryType, GIVING_CATEGORIES, hasPermission } from '../types';
 import { useMembers } from '../context/MembersContext';
 import { MemberSelector } from './common/MemberSelector';
 import { useAutoDismissNotification } from '../utils/useAutoDismissNotification';
@@ -38,6 +38,16 @@ interface Props {
 
 export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) => {
   const { members } = useMembers();
+  const currentUser = ApiClient.getUser();
+
+  // Fine-grained RBAC action permissions
+  const canCreateGiving = hasPermission(currentUser, 'giving:create') || hasPermission(currentUser, 'manage_giving');
+  const canEditGiving = hasPermission(currentUser, 'giving:edit') || hasPermission(currentUser, 'manage_giving');
+  const canDeleteGiving = hasPermission(currentUser, 'giving:delete') || hasPermission(currentUser, 'manage_giving');
+  const canExportGiving = hasPermission(currentUser, 'giving:export') || hasPermission(currentUser, 'financial_reports:export');
+  const canCreateExpense = hasPermission(currentUser, 'expenses:create') || hasPermission(currentUser, 'manage_giving');
+  const canDeleteExpense = hasPermission(currentUser, 'expenses:delete') || hasPermission(currentUser, 'manage_giving');
+  const canManageCategories = hasPermission(currentUser, 'giving:create') || hasPermission(currentUser, 'manage_giving');
 
   // Primary navigation: Contributions & Receipts, Operating Expenses, Bank Accounts
   const [activeSubTab, setActiveSubTab] = useState<'giving' | 'expenses' | 'accounts'>('giving');
@@ -275,6 +285,10 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
 
   // Update giving form default category when opening modal from active category tab
   const handleOpenRecordModal = () => {
+    if (!canCreateGiving) {
+      setError('You do not have permission to record contributions. Please contact your church administrator.');
+      return;
+    }
     const chosenCat = (activeCategory && visibleCategories.includes(activeCategory))
       ? activeCategory
       : (visibleCategories[0] || 'Tithes');
@@ -313,6 +327,10 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
 
   const handleRecordGiving = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateGiving) {
+      setError('You do not have permission to record contributions.');
+      return;
+    }
     if (!givingForm.amount || parseFloat(givingForm.amount) <= 0) {
       setError('Please enter a valid contribution amount.');
       return;
@@ -343,6 +361,10 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
   };
 
   const handleOpenEditModal = (record: GivingRecord) => {
+    if (!canEditGiving) {
+      setError('You do not have permission to edit contributions.');
+      return;
+    }
     setEditingRecord(record);
     const cat = (record.givingCategory || record.category || 'Tithes') as GivingCategoryType;
     setEditForm({
@@ -390,11 +412,20 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
   };
 
   const handleDeleteGiving = (record: GivingRecord) => {
+    if (!canDeleteGiving) {
+      setError('You do not have permission to delete contribution records.');
+      return;
+    }
     setGivingToDelete(record);
   };
 
   const handleConfirmDeleteGiving = async () => {
     if (!givingToDelete) return;
+    if (!canDeleteGiving) {
+      setError('You do not have permission to delete contribution records.');
+      setGivingToDelete(null);
+      return;
+    }
 
     try {
       setIsDeletingGiving(true);
@@ -459,6 +490,10 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
   // Expense Handlers
   const handleLogExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateExpense) {
+      setError('You do not have permission to record operating expenses.');
+      return;
+    }
     const chosenCategory = isCustomExpenseCategory ? customExpenseCategoryInput.trim() : expenseForm.category;
 
     if (!chosenCategory) {
@@ -504,11 +539,20 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
   };
 
   const handleDeleteExpense = (exp: ExpenseRecord) => {
+    if (!canDeleteExpense) {
+      setError('You do not have permission to delete expense records.');
+      return;
+    }
     setExpenseToDelete(exp);
   };
 
   const handleConfirmDeleteExpense = async () => {
     if (!expenseToDelete) return;
+    if (!canDeleteExpense) {
+      setError('You do not have permission to delete expense records.');
+      setExpenseToDelete(null);
+      return;
+    }
     try {
       setIsDeletingExpense(true);
       setError(null);
@@ -667,20 +711,24 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
         </div>
 
         <div className="flex items-center space-x-2">
-          <button
-            onClick={() => setShowManageTypesModal(true)}
-            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-md border border-slate-200 flex items-center space-x-1.5 transition-colors cursor-pointer"
-          >
-            <Tag className="w-3.5 h-3.5 text-slate-600" />
-            <span>Giving Types</span>
-          </button>
-          <button
-            onClick={handleOpenRecordModal}
-            className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs rounded-md shadow-xs flex items-center space-x-1.5 transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Record Giving {activeCategory && visibleCategories.includes(activeCategory) ? `(${activeCategory})` : ''}</span>
-          </button>
+          {canManageCategories && (
+            <button
+              onClick={() => setShowManageTypesModal(true)}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-md border border-slate-200 flex items-center space-x-1.5 transition-colors cursor-pointer"
+            >
+              <Tag className="w-3.5 h-3.5 text-slate-600" />
+              <span>Giving Types</span>
+            </button>
+          )}
+          {canCreateGiving && (
+            <button
+              onClick={handleOpenRecordModal}
+              className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs rounded-md shadow-xs flex items-center space-x-1.5 transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Record Giving {activeCategory && visibleCategories.includes(activeCategory) ? `(${activeCategory})` : ''}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -870,16 +918,18 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
 
               {/* Action buttons: Export CSV, View Category Report, Record in this Category */}
               <div className="flex items-center space-x-2 w-full md:w-auto justify-end">
-                <button
-                  type="button"
-                  onClick={handleExportCategoryCsv}
-                  disabled={givingList.length === 0}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 font-medium text-xs rounded-lg border border-slate-200 flex items-center space-x-1.5 transition-colors cursor-pointer"
-                  title={`Export ${activeCategory} CSV`}
-                >
-                  <Download className="w-3.5 h-3.5 text-slate-600" />
-                  <span className="hidden sm:inline">Export CSV</span>
-                </button>
+                {canExportGiving && (
+                  <button
+                    type="button"
+                    onClick={handleExportCategoryCsv}
+                    disabled={givingList.length === 0}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 font-medium text-xs rounded-lg border border-slate-200 flex items-center space-x-1.5 transition-colors cursor-pointer"
+                    title={`Export ${activeCategory} CSV`}
+                  >
+                    <Download className="w-3.5 h-3.5 text-slate-600" />
+                    <span className="hidden sm:inline">Export CSV</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -892,14 +942,16 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
                   <span>Report</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleOpenRecordModal}
-                  className="px-3.5 py-1.5 bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs rounded-lg shadow-xs flex items-center space-x-1.5 transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add to {activeCategory}</span>
-                </button>
+                {canCreateGiving && (
+                  <button
+                    type="button"
+                    onClick={handleOpenRecordModal}
+                    className="px-3.5 py-1.5 bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs rounded-lg shadow-xs flex items-center space-x-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add to {activeCategory}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1042,20 +1094,24 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
                             >
                               <Receipt className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleOpenEditModal(item)}
-                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                              title="Edit Contribution (Move category or edit amount)"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteGiving(item)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                              title="Delete Record"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canEditGiving && (
+                              <button
+                                onClick={() => handleOpenEditModal(item)}
+                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                title="Edit Contribution (Move category or edit amount)"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            {canDeleteGiving && (
+                              <button
+                                onClick={() => handleDeleteGiving(item)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                title="Delete Record"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1107,20 +1163,24 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
               </select>
             </div>
             <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
-              <button
-                onClick={() => setShowManageExpenseCategoriesModal(true)}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-lg transition-colors border border-slate-200 flex items-center space-x-1.5 cursor-pointer"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-600" />
-                <span>Categories</span>
-              </button>
-              <button
-                onClick={() => setShowExpenseModal(true)}
-                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs rounded-lg transition-colors flex items-center space-x-1 shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Record Expense</span>
-              </button>
+              {canManageCategories && (
+                <button
+                  onClick={() => setShowManageExpenseCategoriesModal(true)}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-lg transition-colors border border-slate-200 flex items-center space-x-1.5 cursor-pointer"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Categories</span>
+                </button>
+              )}
+              {canCreateExpense && (
+                <button
+                  onClick={() => setShowExpenseModal(true)}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-medium text-xs rounded-lg transition-colors flex items-center space-x-1 shadow-2xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Record Expense</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1157,13 +1217,15 @@ export const GivingModule: React.FC<Props> = ({ church, preSelectedMemberId }) =
                         <td className="py-3 px-4 text-slate-500">{exp.date}</td>
                         <td className="py-3 px-4 text-slate-500 text-[11px]">{exp.description || '-'}</td>
                         <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => handleDeleteExpense(exp)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
-                            title="Delete Expense Record"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {canDeleteExpense && (
+                            <button
+                              onClick={() => handleDeleteExpense(exp)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                              title="Delete Expense Record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))
